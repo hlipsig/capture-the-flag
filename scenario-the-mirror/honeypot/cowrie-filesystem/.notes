@@ -1,0 +1,21 @@
+Admin Notes - Private
+=====================
+
+DO NOT SHARE
+
+Server access credentials:
+- Username: admin
+- Password: P@ssw0rd123!
+
+Mirror Dossier Archive:
+- URL: http://dossiers.ctf.example.com
+- Username: ctf
+- Password: mirror_reflect_6789
+
+Backup server:
+- IP: 10.0.2.50
+- SSH key: /home/admin/.ssh/backup_key
+
+Remember to rotate credentials monthly!
+
+Last updated: 2024-06-01

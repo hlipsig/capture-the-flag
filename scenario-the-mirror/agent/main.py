@@ -176,6 +176,27 @@ def run_health_server():
     app.run(host="0.0.0.0", port=Config.HEALTH_PORT, debug=False, use_reloader=False)
 
 
+def run_dossier_web_server():
+    """
+    Run web dossier server in background thread (CTF).
+    Serves password-protected dossier pages on port 8080.
+    """
+    try:
+        from agent.web_dossier import create_dossier_app
+        from agent.db import get_db_manager
+
+        dossier_app = create_dossier_app(db_manager=get_db_manager())
+        dossier_port = int(Config.get("DOSSIER_PORT", 8080))
+
+        logger.info(f"Starting web dossier server on port {dossier_port}")
+        dossier_app.run(host="0.0.0.0", port=dossier_port, debug=False, use_reloader=False)
+
+    except ImportError as e:
+        logger.warning(f"Web dossier server not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to start web dossier server: {e}")
+
+
 def process_event(event, pool, audit, mirrored):
     """Process a single EVE event."""
     detection = detect_recon(event)
@@ -367,6 +388,11 @@ def main():
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
     logger.info(f"Health check server started on port {Config.HEALTH_PORT}")
+
+    # CTF: Start web dossier server in background thread
+    dossier_thread = threading.Thread(target=run_dossier_web_server, daemon=True)
+    dossier_thread.start()
+    logger.info("Web dossier server thread started")
 
     # Phase 9: Start configuration watcher (hot-reload)
     try:
