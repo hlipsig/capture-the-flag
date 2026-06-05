@@ -1,0 +1,210 @@
+"""
+Slack integration for The Mirror.
+
+Posts notifications to Slack channels when incidents are detected.
+"""
+
+import logging
+import os
+import json
+from typing import Dict, Any, Optional
+from datetime import datetime, timezone
+import requests
+
+logger = logging.getLogger(__name__)
+
+
+class SlackNotifier:
+    """Send notifications to Slack via webhook."""
+
+    def __init__(self, webhook_url: Optional[str] = None):
+        """
+        Initialize Slack integration.
+
+        Args:
+            webhook_url: Slack webhook URL (or from env SLACK_WEBHOOK_URL)
+        """
+        self.webhook_url = webhook_url or os.getenv("SLACK_WEBHOOK_URL")
+
+        if not self.webhook_url:
+            logger.warning("SLACK_WEBHOOK_URL not configured, Slack notifications disabled")
+            self.enabled = False
+        else:
+            self.enabled = True
+            logger.info("Slack integration initialized")
+
+    def send_incident_notification(
+        self,
+        incident_id: str,
+        attacker_ip: str,
+        detection: Dict[str, Any],
+        osint_data: Dict[str, Any],
+        actions: list,
+        github_issue_url: Optional[str] = None,
+    ) -> bool:
+        """
+        Send incident notification to Slack.
+
+        Args:
+            incident_id: Unique incident identifier
+            attacker_ip: Source IP address
+            detection: Detection data
+            osint_data: OSINT results
+            actions: Actions taken
+            github_issue_url: URL to GitHub issue (if created)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.enabled:
+            logger.debug("Slack notifications disabled, skipping")
+            return False
+
+        try:
+            whois = osint_data.get("modules", {}).get("whois", {})
+            signature = detection.get("signature", "Unknown")
+            confidence = detection.get("confidence", 0.97)
+
+            # Build message blocks
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "🚨 New Security Incident",
+                        "emoji": True,
+                    },
+                },
+                {"type": "divider"},
+                {
+                    "type": "section",
+                    "fields": [
+                        {"type": "mrkdwn", "text": f"*Incident:*\n{incident_id}"},
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Attacker:*\n`{attacker_ip}`",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Organization:*\n{whois.get('org', 'Unknown')}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Country:*\n{whois.get('country', 'Unknown')}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Detection:*\n{signature}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Confidence:*\n{confidence:.2f}",
+                        },
+                    ],
+                },
+            ]
+
+            # Add actions taken
+            if actions:
+                actions_text = "*Actions Taken:*\n"
+                for action in actions[:3]:  # Show top 3
+                    actions_text += f"• {action.get('name', 'Unknown')}\n"
+
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": actions_text},
+                    }
+                )
+
+            # Add evidence count
+            evidence_count = len(osint_data.get("modules", {}))
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*Evidence:* {evidence_count} artifacts collected",
+                    },
+                }
+            )
+
+            # Add GitHub issue link if available
+            if github_issue_url:
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"<{github_issue_url}|View Full Report on GitHub>",
+                        },
+                    }
+                )
+
+            blocks.append({"type": "divider"})
+            blocks.append(
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Generated by The Mirror at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                        }
+                    ],
+                }
+            )
+
+            # Send to Slack
+            payload = {"blocks": blocks}
+
+            response = requests.post(
+                self.webhook_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+
+            if response.status_code == 200:
+                logger.info(f"Sent Slack notification for {incident_id}")
+                return True
+            else:
+                logger.error(
+                    f"Slack API error: {response.status_code} - {response.text}"
+                )
+                return False
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send Slack notification: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error sending Slack notification: {e}")
+            return False
+
+    def send_simple_message(self, text: str) -> bool:
+        """
+        Send simple text message to Slack.
+
+        Args:
+            text: Message text
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.enabled:
+            return False
+
+        try:
+            payload = {"text": text}
+
+            response = requests.post(
+                self.webhook_url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=10,
+            )
+
+            return response.status_code == 200
+
+        except Exception as e:
+            logger.error(f"Failed to send Slack message: {e}")
+            return False
