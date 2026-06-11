@@ -10,6 +10,7 @@ Phase 4: Will create Istio VirtualService instead of nftables rules
 import ipaddress
 import json
 import logging
+import os
 import sys
 import threading
 from datetime import datetime, timezone
@@ -179,14 +180,14 @@ def run_health_server():
 def run_dossier_web_server():
     """
     Run web dossier server in background thread (CTF).
-    Serves password-protected dossier pages on port 8080.
+    Serves password-protected dossier pages on port 8081.
     """
     try:
         from agent.web_dossier import create_dossier_app
         from agent.db import get_db_manager
 
         dossier_app = create_dossier_app(db_manager=get_db_manager())
-        dossier_port = int(Config.get("DOSSIER_PORT", 8080))
+        dossier_port = int(os.getenv("DOSSIER_PORT", "8081"))
 
         logger.info(f"Starting web dossier server on port {dossier_port}")
         dossier_app.run(host="0.0.0.0", port=dossier_port, debug=False, use_reloader=False)
@@ -290,15 +291,30 @@ def run_stdin_mode():
     health_status["ready"] = True
     logger.info("Agent ready to process events")
 
-    for line in sys.stdin:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse EVE event: {e}")
-            continue
+    # Keep process alive even if stdin closes (for Kubernetes deployment)
+    import select
+    try:
+        for line in sys.stdin:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse EVE event: {e}")
+                continue
 
-        if process_event(event, pool, audit, mirrored):
-            health_status["incidents_processed"] += 1
+            if process_event(event, pool, audit, mirrored):
+                health_status["incidents_processed"] += 1
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Shutting down gracefully...")
+        raise
+
+    # If stdin closes, keep the process alive for health checks
+    logger.info("stdin closed, entering keep-alive mode for health endpoint")
+    try:
+        import time
+        while True:
+            time.sleep(60)
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Shutting down gracefully...")
 
 
 def run_kafka_mode():
@@ -392,7 +408,16 @@ def main():
     # CTF: Start web dossier server in background thread
     dossier_thread = threading.Thread(target=run_dossier_web_server, daemon=True)
     dossier_thread.start()
-    logger.info("Web dossier server thread started")
+
+    # CTF: Start honeypot log watcher (automatic incident detection)
+    # DISABLED: AI model download causes crashes - using manual incident creation
+    # try:
+    #     from agent.honeypot_log_watcher import watch_honeypot_logs
+    #     log_watcher_thread = threading.Thread(target=watch_honeypot_logs, daemon=True)
+    #     log_watcher_thread.start()
+    #     logger.info("Honeypot log watcher thread started")
+    # except Exception as e:
+    #     logger.warning(f"Failed to start log watcher: {e}")
 
     # Phase 9: Start configuration watcher (hot-reload)
     try:

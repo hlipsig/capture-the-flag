@@ -7,6 +7,7 @@ Password is discoverable through honeypot interaction.
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from functools import wraps
@@ -19,14 +20,85 @@ logger = logging.getLogger(__name__)
 # Password stored as env var (set in K8s Secret)
 DOSSIER_PASSWORD = os.getenv("DOSSIER_PASSWORD", "mirror_reflect_6789")
 
+# Rate limiting for failed password attempts
+RATE_LIMIT_WINDOW = 300  # 5 minutes
+RATE_LIMIT_MAX_ATTEMPTS = 5  # Max failed attempts before lockout
+RATE_LIMIT_LOCKOUT = 900  # 15 minute lockout after exceeding attempts
+
+# Track failed attempts: {ip: [(timestamp, username, password), ...]}
+failed_attempts: Dict[str, List[tuple]] = {}
+
 
 def check_auth(username: str, password: str) -> bool:
     """Check if username/password combination is valid."""
     return username == "ctf" and password == DOSSIER_PASSWORD
 
 
+def is_rate_limited(ip: str) -> tuple[bool, Optional[int]]:
+    """
+    Check if IP is rate-limited due to failed password attempts.
+
+    Returns:
+        (is_limited, seconds_until_unlock)
+    """
+    if ip not in failed_attempts:
+        return False, None
+
+    now = time.time()
+
+    # Remove old attempts outside the window
+    cutoff = now - RATE_LIMIT_WINDOW
+    failed_attempts[ip] = [
+        (ts, u, p) for ts, u, p in failed_attempts[ip] if ts > cutoff
+    ]
+
+    # Check if they've exceeded attempts
+    recent_failures = len(failed_attempts[ip])
+
+    if recent_failures >= RATE_LIMIT_MAX_ATTEMPTS:
+        # Check if still in lockout period
+        most_recent = max(ts for ts, _, _ in failed_attempts[ip])
+        lockout_until = most_recent + RATE_LIMIT_LOCKOUT
+        if now < lockout_until:
+            seconds_remaining = int(lockout_until - now)
+            return True, seconds_remaining
+
+    return False, None
+
+
+def record_failed_attempt(ip: str, username: str, password: str):
+    """Record a failed authentication attempt."""
+    if ip not in failed_attempts:
+        failed_attempts[ip] = []
+
+    failed_attempts[ip].append((time.time(), username, password))
+
+    # Log the attempt
+    attempt_count = len(failed_attempts[ip])
+    logger.warning(f"Failed password attempt from {ip}: username='{username}', password='{password}' (attempt #{attempt_count})")
+
+    # Log if they're trying decoy passwords
+    decoys = ['Hi_TOM!', 'invisible_hand_1776', 'creative_destruction', 'wealth_of_nations']
+    if password in decoys:
+        logger.info(f"🎭 {ip} tried decoy password: {password}")
+
+
 def authenticate():
     """Send 401 response to trigger basic auth."""
+    ip = request.remote_addr
+
+    # Check if rate-limited
+    is_limited, seconds_remaining = is_rate_limited(ip)
+
+    if is_limited:
+        logger.warning(f"🚫 Rate limit exceeded for {ip} - locked out for {seconds_remaining}s")
+        return Response(
+            f'Too many failed attempts. Try again in {seconds_remaining} seconds.\n'
+            f'The mirror is watching your brute force attempts.\n',
+            429,  # Too Many Requests
+            {'Retry-After': str(seconds_remaining)}
+        )
+
     return Response(
         'Authentication required. Use credentials found in the honeypot.\n'
         'Hint: Username is "ctf", password is somewhere in /home/admin/.notes\n',
@@ -39,9 +111,30 @@ def requires_auth(f):
     """Decorator for routes requiring authentication."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        ip = request.remote_addr
+
+        # Check rate limit first
+        is_limited, seconds_remaining = is_rate_limited(ip)
+        if is_limited:
+            logger.warning(f"🚫 Rate-limited request from {ip}")
+            return Response(
+                f'Too many failed attempts. Try again in {seconds_remaining} seconds.\n',
+                429,
+                {'Retry-After': str(seconds_remaining)}
+            )
+
         auth = request.authorization
         if not auth or not check_auth(auth.username, auth.password):
+            # Record failed attempt
+            if auth:
+                record_failed_attempt(ip, auth.username, auth.password)
             return authenticate()
+
+        # Successful auth - clear failed attempts for this IP
+        if ip in failed_attempts:
+            logger.info(f"✅ Successful authentication from {ip} - clearing failed attempts")
+            del failed_attempts[ip]
+
         return f(*args, **kwargs)
     return decorated
 
@@ -89,7 +182,7 @@ def create_dossier_app(db_manager=None):
                             incident_id,
                             attacker_ip,
                             detection_signature,
-                            confidence,
+                            detection_confidence,
                             first_seen,
                             status
                         FROM incidents
@@ -162,7 +255,7 @@ def create_dossier_app(db_manager=None):
                         SELECT
                             timestamp,
                             action_name,
-                            result,
+                            action_result,
                             parameters
                         FROM audit_log
                         WHERE incident_id = %s
@@ -214,9 +307,9 @@ def create_dossier_app(db_manager=None):
                             incident_id,
                             attacker_ip,
                             detection_signature,
-                            confidence,
+                            detection_confidence,
                             first_seen,
-                            osint_data
+                            attacker_info
                         FROM incidents
                         WHERE attacker_ip = %s
                         ORDER BY first_seen DESC
@@ -551,10 +644,22 @@ DOSSIER_DETAIL_TEMPLATE = """
         <p><strong>Incident ID:</strong> {{ incident.incident_id }}</p>
         <p><strong>Attacker IP:</strong> <code>{{ incident.attacker_ip }}</code></p>
         <p><strong>Detection:</strong> {{ incident.detection_signature }}</p>
-        <p><strong>Confidence:</strong> {{ "%.2f"|format(incident.confidence) }}</p>
+        <p><strong>Confidence:</strong> {{ "%.2f"|format(incident.detection_confidence) }}</p>
         <p><strong>First Seen:</strong> {{ incident.first_seen.strftime('%Y-%m-%d %H:%M:%S UTC') if incident.first_seen else 'N/A' }}</p>
         <p><strong>Status:</strong> {{ incident.status }}</p>
     </div>
+
+    {% if incident.ai_narrative %}
+    <div class="section" style="border-color: #00aaff; background: #001122;">
+        <h3 style="color: #00aaff;">🤖 AI Threat Analysis</h3>
+        <p style="color: #00ddff; line-height: 1.6; font-size: 1.05em;">
+            {{ incident.ai_narrative }}
+        </p>
+        <p style="margin-top: 15px; font-size: 0.85em; color: #0088cc; font-style: italic;">
+            Generated by Hugging Face AI threat intelligence model
+        </p>
+    </div>
+    {% endif %}
 
     <div class="section">
         <h3>🌐 OSINT Intelligence</h3>
@@ -597,9 +702,9 @@ DOSSIER_DETAIL_TEMPLATE = """
     <div class="section">
         <h3>📊 Threat Assessment</h3>
         <p><strong>Risk Level:</strong>
-            {% if incident.confidence >= 0.9 %}
+            {% if incident.detection_confidence >= 0.9 %}
             <span style="color: #ff0000;">HIGH</span>
-            {% elif incident.confidence >= 0.7 %}
+            {% elif incident.detection_confidence >= 0.7 %}
             <span style="color: #ffaa00;">MEDIUM</span>
             {% else %}
             <span style="color: #00ff00;">LOW</span>

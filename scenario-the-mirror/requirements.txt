@@ -40,10 +40,6 @@ opentelemetry-instrumentation-flask>=0.43b0
 # Phase 8: Incident report templates
 jinja2>=3.1.0
 
-# CTF Enhancement: GitHub Issues + Slack Integration
-PyGithub>=2.1.1
-requests>=2.31.0
-
 # Phase 9: Hot-reload
 watchdog>=4.0.0
 
