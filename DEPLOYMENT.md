@@ -1,482 +1,169 @@
-# Deployment Guide - The Mirror CTF
+# Deploying the Mirror Agent
 
-Complete deployment guide for The Mirror Capture The Flag environment with GitHub integration.
+A practical guide to how the agent runs, what access it needs, and how it knows what it's allowed to do.
 
-## Prerequisites
+## What the Agent Actually Is
 
-- OpenShift 4.x or Kubernetes 1.25+
-- Istio service mesh installed
-- `kubectl` or `oc` CLI configured
-- GitHub personal access token
-- (Optional) Slack incoming webhook URL
+It's a Python process that runs continuously — a long-running service, same as nginx or a database. It starts, watches telemetry for reconnaissance patterns, and acts when it sees something. There's no special AI platform required. It's a script.
 
-## Quick Start
+## How It Runs
+
+The agent runs as a **systemd service**:
+
+```ini
+# /etc/systemd/system/mirror-agent.service
+
+[Unit]
+Description=The Mirror — autonomous counter-reconnaissance agent
+After=network.target suricata.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/cyber-riposte/scenario-the-mirror/mirror_agent.py
+Restart=on-failure
+RestartSec=5
+WorkingDirectory=/opt/cyber-riposte/scenario-the-mirror
+
+# API keys for OSINT modules
+Environment=SHODAN_API_KEY=your-key-here
+
+# Permissions (see "How It Gets Access" below)
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectSystem=strict
+ReadOnlyPaths=/var/log/suricata
+ReadWritePaths=/var/log/cyber-riposte
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ```bash
-# Clone repository
-git clone https://github.com/hlipsig/capture-the-flag.git
-cd capture-the-flag/scenario-the-mirror
-
-# Create namespace
-kubectl create namespace ctf
-
-# Configure secrets
-kubectl create secret generic mirror-integrations \
-  --from-literal=GITHUB_TOKEN=ghp_your_token_here \
-  --from-literal=GITHUB_REPO=hlipsig/capture-the-flag \
-  --from-literal=DATABASE_URL=postgresql://mirror:password@postgres:5432/mirror \
-  --from-literal=REDIS_URL=redis://redis:6379/0 \
-  --from-literal=SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL \
-  -n ctf
-
-# Deploy infrastructure
-kubectl apply -f k8s/ -n ctf
-
-# Verify deployment
-kubectl get pods -n ctf
+sudo systemctl enable --now mirror-agent
 ```
 
-## Detailed Setup
+When the machine boots, systemd starts the agent. If it crashes, systemd restarts it. It runs 24/7.
 
-### 1. GitHub Personal Access Token
+### Input: Where Telemetry Comes From
 
-Create a GitHub token with `repo` scope:
-
-1. Go to https://github.com/settings/tokens
-2. Click **Generate new token (classic)**
-3. Name: `mirror-ctf-integration`
-4. Scopes:
-   - ✅ `repo` (Full control of private repositories)
-5. Click **Generate token**
-6. **Copy the token** (starts with `ghp_`)
-
-### 2. Slack Webhook (Optional)
-
-Create a Slack incoming webhook:
-
-1. Go to https://api.slack.com/apps
-2. Create a new app
-3. Enable **Incoming Webhooks**
-4. Add webhook to workspace
-5. Select channel: `#ctf-incidents`
-6. **Copy the webhook URL**
-
-### 3. Configure Secrets
-
-Edit `k8s/integrations-secret.yaml`:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mirror-integrations
-  namespace: ctf
-type: Opaque
-stringData:
-  GITHUB_TOKEN: "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # Your token
-  GITHUB_REPO: "hlipsig/capture-the-flag"
-  SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/xxx/yyy/zzz"
-  DATABASE_URL: "postgresql://mirror:password@postgres:5432/mirror"
-  REDIS_URL: "redis://redis:6379/0"
-  SHODAN_API_KEY: "your_shodan_key"  # Optional
-```
-
-Apply the secret:
+The agent reads a stream of JSON events — specifically, Suricata's EVE log. The simplest version is literally:
 
 ```bash
-kubectl apply -f k8s/integrations-secret.yaml
+tail -F /var/log/suricata/eve.json | python3 mirror_agent.py
 ```
 
-### 4. Deploy PostgreSQL
+The agent reads one JSON line at a time from stdin, checks if it's interesting, and acts if it is. In production you'd use something more robust (a message queue, a log shipper like Filebeat pushing to the agent), but the core mechanic is the same: events come in, the agent processes them one at a time.
 
-```bash
-kubectl apply -f k8s/postgres-statefulset.yaml
-kubectl apply -f k8s/postgres-service.yaml
-kubectl apply -f k8s/postgres-pvc.yaml
+## How It Gets Access
 
-# Wait for PostgreSQL to be ready
-kubectl wait --for=condition=ready pod -l app=postgres -n ctf --timeout=120s
+The agent needs permission to do four things:
 
-# Initialize database schema
-kubectl apply -f k8s/postgres-init-job.yaml
+### 1. Read Telemetry
+
+Access to Suricata's EVE log file. The systemd unit grants read-only access:
+
+```ini
+ReadOnlyPaths=/var/log/suricata
 ```
 
-### 5. Deploy Redis
+### 2. Apply Firewall Rules
 
-```bash
-kubectl apply -f k8s/redis-deployment.yaml
-kubectl apply -f k8s/redis-service.yaml
+The agent runs `nft` commands to redirect and block traffic. Rather than giving it full root, you grant just the capability it needs:
+
+```ini
+CapabilityBoundingSet=CAP_NET_ADMIN
 ```
 
-### 6. Deploy Kafka (Development)
+This lets it run `nft add rule ...` but not read `/etc/shadow`, install packages, or do anything else that root could do. It gets the minimum privilege required.
 
-For development, deploy standalone Kafka:
+### 3. Run OSINT Lookups
 
-```bash
-kubectl apply -f k8s/kafka-statefulset.yaml
-kubectl apply -f k8s/kafka-service.yaml
+The agent makes outbound HTTP requests to public data sources (WHOIS, Shodan API, crt.sh). It needs:
+- Outbound network access (standard for any service)
+- API keys passed via environment variables
+
+```ini
+Environment=SHODAN_API_KEY=your-key-here
 ```
 
-For production, use **Red Hat AMQ Streams** operator.
+No special permissions — it's just making HTTP calls to public APIs.
 
-### 7. Deploy Istio Components
+### 4. Write Audit Logs and Evidence
 
-```bash
-# Deploy Istio Gateway
-kubectl apply -f k8s/istio/gateway.yaml
+The agent gets a dedicated directory for its output:
 
-# Deploy default VirtualService (will be modified by agent)
-kubectl apply -f k8s/istio/virtualservice-default.yaml
-
-# Create RBAC for agent to manage VirtualServices
-kubectl apply -f k8s/agent-rbac-istio.yaml
+```ini
+ReadWritePaths=/var/log/cyber-riposte
 ```
 
-### 8. Deploy Honeypots
+Everything else on the filesystem is read-only (`ProtectSystem=strict`). The agent can only write to its designated log directory. It cannot modify its own code, its own config, or anything outside its sandbox.
 
-```bash
-# Cowrie SSH honeypot
-kubectl apply -f k8s/honeypot-cowrie.yaml
+## How It Knows the Action Pool
 
-# Glastopf HTTP honeypot
-kubectl apply -f k8s/honeypot-glastopf.yaml
+The action pool is a YAML file (`action-pool.yaml`) that sits next to the agent script. When the agent starts, it loads the file into memory:
 
-# Unified honeypot service
-kubectl apply -f k8s/honeypot-service.yaml
-
-# PCAP capture DaemonSet
-kubectl apply -f k8s/pcap-capture.yaml
+```python
+class ActionPool:
+    def __init__(self):
+        with open("action-pool.yaml") as f:
+            self.config = yaml.safe_load(f)
 ```
 
-### 9. Deploy The Mirror Agent
+Every time the agent wants to do something, it checks the pool first:
 
-```bash
-# ConfigMaps for action pool and detection rules
-kubectl apply -f k8s/agent-configmap.yaml
-
-# Agent deployment
-kubectl apply -f k8s/agent-deployment.yaml
-kubectl apply -f k8s/agent-service.yaml
+```python
+can_execute, reason = pool.can_execute("redirect-to-honeypot")
+if not can_execute:
+    # Action not authorized — skip and log why
+    audit.record(action="redirect-to-honeypot", result="skipped", reason=reason)
+    return
 ```
 
-### 10. Deploy Observability Stack
+The pool defines:
+- **What actions exist** (redirect, OSINT, block, collect evidence)
+- **What tier each action is** (auto-execute, auto-execute+notify, PR-required)
+- **What constraints apply** (max IPs/hour, allowlisted ranges, auto-expiry timers)
+- **What can never be touched** (allowlisted IPs, internal ranges)
 
-```bash
-# ServiceMonitor for Prometheus
-kubectl apply -f k8s/servicemonitor.yaml
+If an action isn't in the pool, the agent cannot execute it — the code path doesn't exist. The agent never improvises.
 
-# Import Grafana dashboard
-# Upload dashboards/mirror-agent-grafana.json to Grafana
+**The security team controls the pool, not the agent.** Changing what the agent is allowed to do means editing a YAML file and restarting the service. The agent never modifies its own pool.
+
+## The Flow, Step by Step
+
+```
+ 1. Agent starts, loads action-pool.yaml into memory
+ 2. Agent opens the Suricata EVE log stream and starts reading
+ 3. A JSON event arrives:
+    {"event_type": "alert", "src_ip": "198.51.100.23", "http": {"http_user_agent": "Nuclei"}, ...}
+ 4. Agent checks: is this a recon pattern?
+    → Yes (Suricata alert: port scan + user-agent: Nuclei)
+ 5. Agent checks: is this IP allowlisted?
+    → No
+ 6. Agent checks: can I execute "redirect-to-honeypot"?
+    → Yes (Tier 1, pre-approved, constraints met)
+ 7. Agent runs: nft add rule ... dnat to 10.0.0.99
+ 8. Agent writes audit log entry: what it did, why, evidence ref
+ 9. Agent checks: can I execute "run-osint"?
+    → Yes (Tier 1, pre-approved)
+10. Agent runs WHOIS, reverse DNS, Shodan, Certificate Transparency lookups
+11. Agent writes evidence files + audit log entries
+12. Agent checks: can I execute "temp-block-ip"?
+    → Yes (Tier 1, pre-approved)
+13. Agent runs: nft add rule ... drop (1 hour expiry)
+14. Agent compiles post-mortem report from all audit entries
+15. Agent writes report to /var/log/cyber-riposte/postmortems/
+16. Security team reads the report at 8am
 ```
 
-## Verification
+Every step follows the same pattern: **can I do this?** → check pool → **yes** → do it + log it, or **no** → skip + log why it was skipped.
 
-### Check All Pods Running
+## Phase 1 vs Phase 2
 
-```bash
-kubectl get pods -n ctf
+The deployment described above is **Phase 1: rule-based**. The agent uses pattern matching and thresholds — if the Suricata alert category is in a list of recon categories, if the user-agent matches a known tool signature, if the request count exceeds a threshold.
 
-# Expected output:
-# NAME                              READY   STATUS    RESTARTS   AGE
-# mirror-agent-xxxxx                1/1     Running   0          2m
-# postgres-0                        1/1     Running   0          5m
-# redis-xxxxx                       1/1     Running   0          4m
-# kafka-0                           1/1     Running   0          4m
-# honeypot-cowrie-xxxxx             1/1     Running   0          3m
-# honeypot-glastopf-xxxxx           1/1     Running   0          3m
-```
+This works well for known patterns. But it has limitations:
+- It can only detect patterns you've written rules for
+- It can't reason about novel combinations of signals
+- It can't explain *why* a pattern is suspicious in natural language
 
-### Check Agent Logs
-
-```bash
-kubectl logs -f deployment/mirror-agent -n ctf
-
-# Should see:
-# INFO - GitHub integration initialized for hlipsig/capture-the-flag
-# INFO - Slack integration initialized
-# INFO - Starting Kafka consumer...
-```
-
-### Test GitHub Integration
-
-Send a test event to Kafka:
-
-```bash
-kubectl exec -it kafka-0 -n ctf -- /bin/bash
-
-# Inside Kafka pod:
-echo '{
-  "event_type": "alert",
-  "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%S.%6N%z)'",
-  "src_ip": "203.0.113.42",
-  "dest_ip": "10.0.1.100",
-  "alert": {
-    "signature": "ET SCAN Nmap Scripting Engine User-Agent Detected",
-    "category": "Attempted Information Leak"
-  },
-  "http": {
-    "http_user_agent": "Mozilla/5.0 (compatible; Nmap Scripting Engine)"
-  }
-}' | kafka-console-producer --broker-list localhost:9092 --topic suricata-events
-```
-
-Check GitHub for new issue:
-
-```bash
-gh issue list --repo hlipsig/capture-the-flag --label incident
-```
-
-### Test Slack Integration
-
-Check your `#ctf-incidents` channel for notification.
-
-### Test Honeypot Redirection
-
-```bash
-# Check VirtualService was created
-kubectl get virtualservice -n ctf
-
-# Should see:
-# NAME                    GATEWAYS         HOSTS   AGE
-# redirect-203-0-113-42   [istio-gateway]  [*]     1m
-```
-
-## CTF Participant Access
-
-### DNS Configuration
-
-Point `redteam.ctf.example.com` to your Istio Ingress Gateway:
-
-```bash
-# Get Ingress Gateway IP
-kubectl get svc istio-ingressgateway -n istio-system
-
-# Add DNS A record:
-# redteam.ctf.example.com -> <INGRESS_IP>
-```
-
-### Firewall Rules
-
-Allow inbound traffic on:
-- TCP 80 (HTTP)
-- TCP 443 (HTTPS)
-- TCP 22 (SSH - honeypot)
-- TCP 23 (Telnet - honeypot)
-
-### SSL/TLS Certificate
-
-Deploy cert-manager and request Let's Encrypt certificate:
-
-```bash
-kubectl apply -f k8s/istio/certificate.yaml
-```
-
-## Monitoring
-
-### Grafana Dashboard
-
-1. Access Grafana: `http://grafana.ctf.example.com`
-2. Import dashboard: `dashboards/mirror-agent-grafana.json`
-3. View metrics:
-   - Event rate
-   - Detection latency
-   - Active incidents
-   - OSINT cache hit rate
-
-### Prometheus Metrics
-
-Access Prometheus: `http://prometheus.ctf.example.com`
-
-Query examples:
-```promql
-# Events processed per second
-rate(mirror_events_total[1m])
-
-# Active incidents
-mirror_incidents_active
-
-# OSINT cache hit rate
-rate(mirror_osint_cache_hits_total[5m]) / rate(mirror_osint_cache_total[5m])
-```
-
-### Database Queries
-
-Connect to PostgreSQL:
-
-```bash
-kubectl exec -it postgres-0 -n ctf -- psql -U mirror -d mirror
-
--- View recent incidents
-SELECT * FROM incidents WHERE created_at > NOW() - INTERVAL '1 hour';
-
--- View action stats
-SELECT action_name, COUNT(*) FROM audit_log GROUP BY action_name;
-
--- View active VirtualServices
-SELECT * FROM virtualservices WHERE deleted_at IS NULL;
-```
-
-## Troubleshooting
-
-### No GitHub Issues Created
-
-1. **Check GitHub token**:
-   ```bash
-   kubectl get secret mirror-integrations -n ctf -o jsonpath='{.data.GITHUB_TOKEN}' | base64 -d
-   ```
-
-2. **Check agent logs**:
-   ```bash
-   kubectl logs deployment/mirror-agent -n ctf | grep -i github
-   ```
-
-3. **Test GitHub API connectivity**:
-   ```bash
-   kubectl exec deployment/mirror-agent -n ctf -- curl -H "Authorization: token ghp_xxx" https://api.github.com/user
-   ```
-
-### No Slack Notifications
-
-1. **Check webhook URL**:
-   ```bash
-   kubectl get secret mirror-integrations -n ctf -o jsonpath='{.data.SLACK_WEBHOOK_URL}' | base64 -d
-   ```
-
-2. **Test webhook**:
-   ```bash
-   kubectl exec deployment/mirror-agent -n ctf -- curl -X POST \
-     -H 'Content-Type: application/json' \
-     -d '{"text":"Test from The Mirror"}' \
-     <WEBHOOK_URL>
-   ```
-
-### Honeypot Not Receiving Traffic
-
-1. **Check VirtualService exists**:
-   ```bash
-   kubectl get virtualservice -n ctf
-   ```
-
-2. **Check Istio configuration**:
-   ```bash
-   istioctl analyze -n ctf
-   ```
-
-3. **Check honeypot pods**:
-   ```bash
-   kubectl get pods -l app=honeypot -n ctf
-   kubectl logs deployment/honeypot-cowrie -n ctf
-   ```
-
-### Agent Not Consuming Kafka Events
-
-1. **Check Kafka connectivity**:
-   ```bash
-   kubectl exec deployment/mirror-agent -n ctf -- nc -zv kafka 9092
-   ```
-
-2. **Check Kafka topic exists**:
-   ```bash
-   kubectl exec -it kafka-0 -n ctf -- kafka-topics --list --bootstrap-server localhost:9092
-   ```
-
-3. **Check consumer group**:
-   ```bash
-   kubectl exec -it kafka-0 -n ctf -- kafka-consumer-groups \
-     --bootstrap-server localhost:9092 \
-     --group mirror-agent \
-     --describe
-   ```
-
-## Scaling
-
-### Horizontal Scaling
-
-Scale agent replicas:
-
-```bash
-kubectl scale deployment mirror-agent --replicas=3 -n ctf
-```
-
-Kafka consumer group ensures no duplicate processing.
-
-### Database Connection Pooling
-
-Increase connection pool size in agent configuration:
-
-```yaml
-env:
-  - name: DB_POOL_SIZE
-    value: "20"
-  - name: DB_MAX_OVERFLOW
-    value: "10"
-```
-
-### OSINT Cache TTL
-
-Adjust Redis cache TTL (default 7 days):
-
-```yaml
-env:
-  - name: OSINT_CACHE_TTL
-    value: "604800"  # seconds
-```
-
-## Backup and Recovery
-
-### Database Backup
-
-```bash
-kubectl exec postgres-0 -n ctf -- pg_dump -U mirror mirror > mirror-backup.sql
-```
-
-### Database Restore
-
-```bash
-kubectl exec -i postgres-0 -n ctf -- psql -U mirror -d mirror < mirror-backup.sql
-```
-
-### Export GitHub Issues
-
-```bash
-gh issue list --repo hlipsig/capture-the-flag \
-  --label incident \
-  --state all \
-  --json number,title,body,labels,createdAt \
-  --jq '.' > incidents-backup.json
-```
-
-## Security Considerations
-
-1. **Rotate GitHub Token** every 90 days
-2. **Rotate Slack Webhook** if compromised
-3. **Database Encryption** at rest and in transit
-4. **Network Policies** to restrict pod-to-pod traffic
-5. **RBAC** - agent has minimal required permissions
-6. **Secret Management** - use external secrets operator for production
-
-## Production Checklist
-
-- [ ] GitHub token has `repo` scope only (not full `admin`)
-- [ ] Slack webhook is channel-specific
-- [ ] Database credentials are strong (not default password)
-- [ ] TLS enabled on all external endpoints
-- [ ] Resource limits set on all pods
-- [ ] Horizontal Pod Autoscaler configured
-- [ ] PersistentVolumes have backup retention policy
-- [ ] Network Policies restrict pod communication
-- [ ] Pod Security Standards enforced (baseline or restricted)
-- [ ] Monitoring alerts configured (PagerDuty, OpsGenie)
-- [ ] Runbooks documented for common issues
-- [ ] Incident response procedures defined
-- [ ] Legal review completed for honeypot deployment
-
-## License
-
-MIT License
-
-## Support
-
-For issues or questions:
-- GitHub: https://github.com/hlipsig/capture-the-flag/issues
-- Documentation: https://github.com/hlipsig/cyber-riposte
+**Phase 2** introduces an LLM at the decision layer. See [PHASE2-LLM.md](PHASE2-LLM.md) for how this works and what value it adds.

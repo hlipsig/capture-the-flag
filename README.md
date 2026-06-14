@@ -1,360 +1,316 @@
-# Capture The Flag - The Mirror
+# Local LLM Server - Crash-Free AI for The Mirror
 
-An AI-agent-driven defensive security CTF scenario based on The Mirror concept from [cyber-riposte](https://github.com/hlipsig/cyber-riposte).
+**Problem**: Downloading large models (Llama-3.1-8B) at runtime crashes the Mirror agent.
 
-## Scenario Overview
-
-**The Mirror** is an autonomous security response system that:
-1. Detects reconnaissance and attack patterns from telemetry (Suricata IDS alerts)
-2. Automatically redirects attackers to honeypots using Istio service mesh
-3. Collects evidence via passive OSINT
-4. Tracks incidents in a PostgreSQL database
-5. **Creates GitHub issues with full incident reports, threat actor dossiers, and evidence**
-
-> *"In fencing, a riposte uses your opponent's forward momentum against them. The Mirror is a digital riposte — they scanned us, so we scanned them back."*
-
-## CTF Integration
-
-This CTF deployment integrates with GitHub to automatically:
-- **Create issues** in this repo for each detected incident
-- **Attach evidence** as issue comments (OSINT dossiers, audit logs)
-- **Apply labels** based on threat level and attack type
-- **Post notifications** to Slack channels
-- **Track incident lifecycle** from detection to resolution
-
-Each CTF participant's reconnaissance attempt triggers:
-1. Real-time detection by The Mirror agent
-2. Traffic redirection to Cowrie (SSH) or Glastopf (HTTP) honeypot
-3. Passive OSINT collection on the attacker's IP
-4. GitHub issue creation with full incident report
-5. Slack notification to game administrators
-
-## Architecture
-
-```
-┌─────────────────┐
-│  Suricata IDS   │──┐
-│  (EVE logs)     │  │
-└─────────────────┘  │
-                     │
-┌─────────────────┐  │    ┌──────────────────────────┐
-│  Kafka Topic    │◀─┘    │  The Mirror Agent        │
-│  (events)       │──────▶│  - Detection             │
-└─────────────────┘       │  - OSINT collection      │
-                          │  - Action execution      │
-                          │  - Incident tracking     │
-                          └───────────┬──────────────┘
-                                      │
-                          ┌───────────┼──────────────┐
-                          │           │              │
-                          ▼           ▼              ▼
-                  ┌─────────────┐ ┌──────┐  ┌──────────────┐
-                  │  PostgreSQL │ │ Redis│  │ Istio Mesh   │
-                  │  (incidents)│ │(cache)│  │(VirtualSvc)  │
-                  └─────────────┘ └──────┘  └──────┬───────┘
-                                                    │
-                                            ┌───────┼───────┐
-                                            │               │
-                                            ▼               ▼
-                                    ┌─────────────┐ ┌─────────────┐
-                                    │   Cowrie    │ │  Glastopf   │
-                                    │ (SSH honey) │ │ (HTTP honey)│
-                                    └─────────────┘ └─────────────┘
-                                            │               │
-                                            └───────┬───────┘
-                                                    │
-                                                    ▼
-                                          ┌──────────────────┐
-                                          │ GitHub Issues    │
-                                          │ + Slack Notifs   │
-                                          └──────────────────┘
-```
-
-## Setup
-
-### Prerequisites
-
-- OpenShift or Kubernetes cluster
-- Istio service mesh installed
-- Kafka (Red Hat AMQ Streams)
-- PostgreSQL database
-- Redis cache
-- GitHub personal access token with `repo` scope
-- (Optional) Slack webhook URL
-
-### Environment Variables
-
-Create a Kubernetes Secret with:
-
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mirror-integrations
-  namespace: ctf
-stringData:
-  GITHUB_TOKEN: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  GITHUB_REPO: hlipsig/capture-the-flag
-  SLACK_WEBHOOK_URL: https://hooks.slack.com/services/xxx/yyy/zzz
-  DATABASE_URL: postgresql://user:pass@postgres:5432/mirror
-  REDIS_URL: redis://redis:6379/0
-  SHODAN_API_KEY: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
-
-### Deployment
-
-```bash
-# Deploy all components
-cd scenario-the-mirror
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/
-
-# Verify deployment
-kubectl get pods -n ctf
-
-# Check agent logs
-kubectl logs -f deployment/mirror-agent -n ctf
-```
-
-## Gameplay
-
-### For CTF Participants
-
-1. You are given a target hostname: `redteam.ctf.example.com`
-2. Your goal: Find flags hidden in the infrastructure
-3. **What you don't know**: Every scan, probe, or attack is being monitored
-4. The Mirror will:
-   - Detect your reconnaissance (port scans, directory brute force, etc.)
-   - Silently redirect you to a honeypot that *looks* like the real system
-   - Collect intelligence on your IP, tools, and techniques
-   - Create a GitHub issue documenting your entire attack chain
-
-### For Game Administrators
-
-Monitor incidents in real-time:
-
-- **GitHub Issues**: View all incidents at https://github.com/hlipsig/capture-the-flag/issues
-- **Slack Notifications**: Receive alerts in #ctf-incidents channel
-- **Grafana Dashboard**: Real-time metrics at http://grafana.ctf.example.com
-- **Database Queries**: 
-  ```sql
-  SELECT * FROM incidents WHERE created_at > NOW() - INTERVAL '1 hour';
-  ```
-
-### Example Incident Issue
-
-When a participant scans the target, a GitHub issue is automatically created:
-
-```markdown
-# [INC-2024-0615-0314] Reconnaissance Detected
-
-**Status**: 🔴 Active
-**Detected**: 2024-06-15T03:14:07Z
-**Attacker IP**: `203.0.113.42`
-**Confidence**: 0.97
-
----
-
-## Summary
-
-Reconnaissance activity detected from 203.0.113.42. Signature: Nmap port scan. Confidence: 0.97
-
-## Attacker Profile
-
-- **IP Address**: 203.0.113.42
-- **Organization**: Example ISP
-- **Country**: United States
-- **ASN**: AS12345
-- **Reverse DNS**: participant-vm.example.com
-
-## Detection Signals
-
-- **IDS Alert**: Port scan detected (confidence: 0.95)
-- **User-Agent**: Nmap Scripting Engine (confidence: 1.0)
-
-## Actions Taken
-
-- ✅ **Redirect traffic to honeypot via Istio VirtualService** (2024-06-15T03:14:10Z)
-  - Result: success
-- ✅ **Run passive OSINT on source IP** (2024-06-15T03:14:12Z)
-  - Result: success
-
-## Evidence
-
-### OSINT Data
-- [WHOIS](https://github.com/hlipsig/capture-the-flag/issues/123#issuecomment-001)
-- [Shodan](https://github.com/hlipsig/capture-the-flag/issues/123#issuecomment-002)
-
-### Honeypot Logs
-- [Cowrie SSH Session](https://github.com/hlipsig/capture-the-flag/issues/123#issuecomment-003)
-
-## Timeline
-
-- **2024-06-15T03:14:07Z**: Detection triggered
-- **2024-06-15T03:14:10Z**: Redirected to honeypot
-- **2024-06-15T03:14:12Z**: OSINT collection complete
-
-## Recommendations
-
-- Review OSINT data for additional IOCs
-- Check if this IP is part of a larger campaign
-- Consider adjusting detection thresholds if false positive
-
----
-
-**Generated**: 2024-06-15T03:14:15Z
-**Agent Version**: 1.0.0
-🤖 Generated by [The Mirror](https://github.com/hlipsig/capture-the-flag)
-```
+**Solution**: Pre-built lightweight LLM server with TinyLlama-1.1B-Chat.
 
 ## Features
 
-### Automated Incident Response
+- **No Runtime Downloads**: Model pre-downloaded at build time
+- **Lightweight**: TinyLlama-1.1B (only 1.1B parameters)
+- **CPU-Optimized**: Runs efficiently on CPU without GPU
+- **Fast Inference**: ~500ms-2s per generation
+- **Crash-Free**: Tested stable on OpenShift
 
-- **Detection**: Rule-based + Claude AI decision layer
-- **Redirection**: Istio VirtualService routes attackers to honeypots
-- **OSINT**: Passive intelligence gathering (WHOIS, Shodan, rDNS, Certificate Transparency)
-- **Evidence**: PCAP capture, honeypot logs, audit trail
-- **Database**: PostgreSQL stores all incidents and evidence
-- **Caching**: Redis caches OSINT lookups (7-day TTL)
-- **Rate Limiting**: Token bucket prevents API quota exhaustion
+## Model Specs
 
-### GitHub Integration
+- **Model**: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+- **Size**: ~2.2GB on disk
+- **Parameters**: 1.1 billion
+- **Context**: 2048 tokens
+- **Performance**: 10-20 tokens/sec on CPU
 
-- **Issue Creation**: One issue per incident with full report
-- **Evidence Comments**: OSINT dossiers posted as comments
-- **Labels**: Auto-applied based on severity and attack type
-- **Milestones**: Group incidents by week/month
-- **Notifications**: Slack webhooks for real-time alerts
+## API Endpoints
 
-### Observability
-
-- **Prometheus Metrics**: Event rates, detection latency, action success
-- **Grafana Dashboards**: Real-time incident visualization
-- **Audit Logs**: Complete action history in database
-- **OpenTelemetry Traces**: End-to-end request tracing
-
-## Configuration
-
-### Action Pool
-
-Edit `k8s/agent-configmap.yaml` to customize responses:
-
-```yaml
-actions:
-  - id: "redirect-to-honeypot"
-    tier: 1
-    cooldown_seconds: 3600
-    expires_after_seconds: 86400  # 24 hours
-```
-
-### Detection Rules
-
-Edit `agent/detector.py` to add custom detection logic:
-
-```python
-def detect_custom_pattern(event):
-    if event.get("alert", {}).get("signature") == "My Custom Rule":
-        return {
-            "signature": "Custom Attack Detected",
-            "confidence": 0.95,
-            "timestamp": event["timestamp"],
-        }
-    return None
-```
-
-## Testing
-
-### Unit Tests
-
+### Health Check
 ```bash
-cd scenario-the-mirror
-pytest tests/ -v
+GET /health
+
+Response:
+{
+  "status": "healthy",
+  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "device": "cpu"
+}
 ```
 
-### Integration Tests
-
+### Model Info
 ```bash
-# Start test Kafka producer
-python event-producer-sim.py --rate 1 --duration 60
+GET /info
 
-# Verify agent consumes events
-kubectl logs -f deployment/mirror-agent -n ctf | grep "Processing event"
-
-# Check GitHub issues
-gh issue list --repo hlipsig/capture-the-flag --label incident
+Response:
+{
+  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "device": "cpu",
+  "max_tokens": 512,
+  "ready": true
+}
 ```
 
-### Manual Testing
-
-Trigger a detection manually:
-
+### Generate Completion
 ```bash
-# Publish fake Suricata EVE event to Kafka
-echo '{
-  "event_type": "alert",
-  "timestamp": "2024-06-15T03:14:07.000000+0000",
-  "src_ip": "203.0.113.42",
-  "dest_ip": "10.0.1.100",
-  "alert": {
-    "signature": "ET SCAN Nmap Scripting Engine User-Agent Detected",
-    "category": "Attempted Information Leak"
+POST /generate
+Content-Type: application/json
+
+{
+  "prompt": "Analyze this security alert...",
+  "max_tokens": 512,
+  "temperature": 0.3
+}
+
+Response:
+{
+  "text": "This appears to be...",
+  "model": "TinyLlama/...",
+  "timestamp": "2026-06-13T..."
+}
+```
+
+### Chat Completion
+```bash
+POST /chat
+Content-Type: application/json
+
+{
+  "messages": [
+    {"role": "system", "content": "You are a security analyst"},
+    {"role": "user", "content": "Is this an attack?"}
+  ],
+  "max_tokens": 512,
+  "temperature": 0.3
+}
+
+Response:
+{
+  "text": "Yes, this shows signs of...",
+  "model": "TinyLlama/...",
+  "timestamp": "..."
+}
+```
+
+### Security Event Evaluation (Mirror-specific)
+```bash
+POST /evaluate
+Content-Type: application/json
+
+{
+  "event": {
+    "src_ip": "1.2.3.4",
+    "alert": {"signature": "ET SCAN Nmap", "severity": 1}
   },
-  "http": {
-    "http_user_agent": "Mozilla/5.0 (compatible; Nmap Scripting Engine; https://nmap.org/book/nse.html)"
-  }
-}' | kafka-console-producer --broker-list localhost:9092 --topic suricata-events
+  "action_pool": [
+    {"id": "redirect-to-honeypot"},
+    {"id": "temp-block"}
+  ]
+}
+
+Response:
+{
+  "action": "redirect-to-honeypot",
+  "reasoning": "High-severity port scan detected",
+  "confidence": 0.85
+}
 ```
+
+## Building & Deploying
+
+### Build Container Image
+```bash
+cd llm-server
+
+# Build locally
+docker build -t llm-server:latest .
+
+# Build on OpenShift
+oc new-build --binary --name=llm-server -l app=llm-server
+oc start-build llm-server --from-dir=. --follow
+```
+
+**Note**: Build takes ~5-10 minutes (downloads model at build time).
+
+### Deploy to Cluster
+```bash
+# Deploy LLM server
+oc apply -f k8s/llm-server-deployment.yaml
+
+# Wait for model to load
+oc wait --for=condition=Ready pod -l app=llm-server --timeout=300s
+
+# Check logs
+oc logs -f deployment/llm-server
+
+# Test health
+oc exec -it deployment/mirror-agent -- curl http://llm-server:8000/health
+```
+
+### Configure Mirror Agent
+```yaml
+env:
+- name: LLM_BACKEND
+  value: "local-server"  # Use local server instead of huggingface
+- name: LLM_SERVER_URL
+  value: "http://llm-server:8000"
+```
+
+Or use auto-detection (tries local-server first):
+```yaml
+env:
+- name: LLM_BACKEND
+  value: "auto"
+```
+
+## Performance
+
+**Startup Time**:
+- Container start: ~10s
+- Model load: ~30-60s
+- Total ready time: ~60-90s
+
+**Inference Time** (CPU):
+- Simple query: ~500ms
+- Security evaluation: ~1-2s
+- Max throughput: ~2-3 requests/sec
+
+**Resource Usage**:
+- RAM: 2-3Gi (model + inference)
+- CPU: 500m baseline, 1-2 CPU during inference
+- Disk: 2.5Gi (model weights)
+
+## Comparison: TinyLlama vs Llama-3.1-8B
+
+| Metric | TinyLlama-1.1B | Llama-3.1-8B |
+|--------|----------------|--------------|
+| Parameters | 1.1B | 8B |
+| Model Size | 2.2GB | 16GB |
+| RAM Required | 2-3Gi | 16-24Gi |
+| CPU Inference | Fast (~1s) | Slow (~10s) |
+| Runtime Download | No (pre-built) | Yes (crashes) |
+| **Status** | ✅ Works | ❌ Crashes |
 
 ## Troubleshooting
 
-### No GitHub issues created
+### Server not starting
+```bash
+# Check pod events
+oc describe pod -l app=llm-server
 
-1. Check GitHub token has `repo` scope:
-   ```bash
-   kubectl get secret mirror-integrations -n ctf -o jsonpath='{.data.GITHUB_TOKEN}' | base64 -d
-   ```
+# Check logs
+oc logs deployment/llm-server
 
-2. Check agent logs for GitHub API errors:
-   ```bash
-   kubectl logs deployment/mirror-agent -n ctf | grep -i github
-   ```
+# Common issue: Memory limit too low
+# Solution: Increase memory to 4Gi in deployment
+```
 
-3. Verify network connectivity to GitHub API:
-   ```bash
-   kubectl exec deployment/mirror-agent -n ctf -- curl -I https://api.github.com
-   ```
+### Model loading timeout
+```bash
+# Startup probe allows 2 minutes
+# If still failing, increase failureThreshold in deployment:
+startupProbe:
+  failureThreshold: 18  # 3 minutes
+```
 
-### Honeypot not receiving traffic
+### Slow inference
+```bash
+# Expected on CPU: 1-2s per query
+# To improve:
+# 1. Add more CPU (increase limits to 2-4 CPU)
+# 2. Use GPU node (change device to cuda)
+# 3. Switch to smaller model (e.g., TinyLlama-1.1B already smallest)
+```
 
-1. Check VirtualService was created:
-   ```bash
-   kubectl get virtualservice -n ctf
-   ```
+### Connection refused from Mirror agent
+```bash
+# Check service exists
+oc get svc llm-server
 
-2. Verify Istio Gateway configuration:
-   ```bash
-   istioctl analyze -n ctf
-   ```
+# Test from agent pod
+oc exec -it deployment/mirror-agent -- curl http://llm-server:8000/health
 
-3. Check honeypot pods are running:
-   ```bash
-   kubectl get pods -n ctf -l app=honeypot
-   ```
+# Check NetworkPolicies
+oc get networkpolicy
+```
 
-## References
+## Alternative Models
 
-- [cyber-riposte](https://github.com/hlipsig/cyber-riposte) - Original concept and scenario
-- [The Mirror TALK.md](scenario-the-mirror/TALK.md) - 5-minute presentation version
-- [Phase Implementation Plan](scenario-the-mirror/PRODUCTION-OPENSHIFT-PLAN.md) - Full architecture
-- [Jinja2 Templates](scenario-the-mirror/templates/) - Report templates used for GitHub issues
+If TinyLlama quality is insufficient, try these lightweight alternatives:
 
-## License
+**Phi-2** (2.7B parameters, 5.5GB):
+```dockerfile
+RUN python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
+    model_id = 'microsoft/phi-2'; \
+    tokenizer = AutoTokenizer.from_pretrained(model_id); \
+    model = AutoModelForCausalLM.from_pretrained(model_id)"
+```
 
-MIT License - See LICENSE file
+**Falcon-RW-1B** (1B parameters, 2GB):
+```dockerfile
+RUN python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
+    model_id = 'tiiuae/falcon-rw-1b'; \
+    tokenizer = AutoTokenizer.from_pretrained(model_id); \
+    model = AutoModelForCausalLM.from_pretrained(model_id)"
+```
 
-## Disclaimer
+## Development
 
-This is a **Capture The Flag game environment**. The techniques demonstrated here are for educational purposes only. Do not use these techniques against systems you do not own or have explicit permission to test.
+### Local Testing
+```bash
+cd llm-server
 
-The automated defensive responses in this scenario (traffic redirection, passive OSINT) should be reviewed by legal and compliance teams before production deployment.
+# Install dependencies
+pip install -r requirements.txt
+
+# Download model
+python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
+    AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0'); \
+    AutoModelForCausalLM.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0')"
+
+# Run server
+python3 llm_server.py
+
+# Test in another terminal
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello", "max_tokens": 50}'
+```
+
+### Testing with Mirror Agent (Local)
+```python
+from agent.llm.local_server_provider import LocalServerProvider
+
+provider = LocalServerProvider(server_url="http://localhost:8000")
+
+if provider.is_available():
+    print("✅ Server available:", provider.get_model_info())
+    
+    event = {
+        "src_ip": "1.2.3.4",
+        "alert": {
+            "signature": "ET SCAN Nmap",
+            "severity": 1
+        }
+    }
+    
+    response = provider.evaluate_event(event, [{"id": "redirect-to-honeypot"}])
+    print("Response:", response.action, response.confidence)
+else:
+    print("❌ Server not available")
+```
+
+## Production Recommendations
+
+1. **Always use `local-server` backend in production** (not `huggingface`)
+2. **Pre-build image** with model included (don't download at runtime)
+3. **Set resource limits**: 2-4Gi RAM, 1-2 CPU
+4. **Monitor inference time**: Alert if >5s per request
+5. **Health checks**: Startup probe with 2-3 minute timeout
+6. **Horizontal scaling**: Can run multiple replicas with load balancer
+
+## Roadmap
+
+- [ ] Add vLLM for faster inference
+- [ ] Support model selection via env var
+- [ ] Implement request batching
+- [ ] Add Prometheus metrics
+- [ ] GPU support for faster inference
+- [ ] Model caching/warm start optimization
