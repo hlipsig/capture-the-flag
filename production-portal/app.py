@@ -9,11 +9,31 @@ Legitimate users who login correctly can find the production secret.
 
 import os
 import secrets
+import logging
 from flask import Flask, render_template_string, request, session, redirect, url_for, jsonify
 from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', secrets.token_hex(32))
+
+# Configure logging to include user-agent (for attack detection)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@app.after_request
+def log_request(response):
+    """Log requests in nginx-like format with user-agent for attack detection."""
+    # Skip health check logging
+    if request.path in ['/health', '/healthz', '/readyz']:
+        return response
+
+    # Log in format that log_detector can parse
+    # Format: IP - - [timestamp] "METHOD path HTTP/1.1" status "user-agent"
+    user_agent = request.headers.get('User-Agent', '-')
+    timestamp = datetime.now().strftime('%d/%b/%Y:%H:%M:%S +0000')
+    log_line = f'{request.remote_addr} - - [{timestamp}] "{request.method} {request.path} HTTP/1.1" {response.status_code} "{user_agent}"'
+    logger.info(log_line)
+    return response
 
 # Production credentials (discoverable via OSINT/hints)
 # Default user: admin / wealth_of_nations (same as honeypot decoy - intentional!)
