@@ -418,7 +418,16 @@ def main():
         log_watcher_thread.start()
         logger.info("✅ Honeypot log watcher thread started - automatic incident detection enabled")
     except Exception as e:
-        logger.warning(f"⚠️  Failed to start log watcher: {e}")
+        logger.warning(f"⚠️  Failed to start honeypot log watcher: {e}")
+
+    # CTF: Start production portal log watcher (if production portal is deployed)
+    try:
+        from agent.production_log_watcher import watch_production_logs
+        production_watcher_thread = threading.Thread(target=watch_production_logs, daemon=True)
+        production_watcher_thread.start()
+        logger.info("✅ Production portal log watcher thread started")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to start production portal log watcher: {e}")
 
     # Phase 9: Start configuration watcher (hot-reload)
     try:
