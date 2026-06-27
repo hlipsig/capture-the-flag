@@ -27,13 +27,48 @@ actions:
   - id: run-osint
     tier: 1
     name: "Run passive OSINT on source IP"
-    description: "WHOIS, reverse DNS, Shodan lookup, Certificate Transparency search"
+    description: "WHOIS, reverse DNS, Shodan lookup, GeoIP, Certificate Transparency search"
     trigger: recon-detected
     constraints:
       passive_only: true
       no_packets_to_target: true
       rate_limit: 10/minute
     data_retention: 90d
+
+  - id: rate-limit-injection
+    tier: 1
+    name: "Inject rate limiting"
+    description: "Dynamically add nginx/envoy rate limit (1 req/s) for attacker IP"
+    trigger: recon-detected
+    constraints:
+      single_ip_only: true
+      rate: 1_request_per_second
+    auto_expire: 1h
+
+  - id: request-fingerprint
+    tier: 1
+    name: "Capture HTTP request fingerprint"
+    description: "Record full HTTP headers, method, path, user-agent for forensics"
+    trigger: any-detection
+    data_retention: 90d
+
+  - id: reverse-shell-check
+    tier: 1
+    name: "Monitor for reverse shells"
+    description: "Check for egress connections from production pods to attacker IP"
+    trigger: post-exploitation-suspected
+    constraints:
+      monitor_egress_only: true
+
+  - id: deploy-honeytokens
+    tier: 1
+    name: "Deploy canary tokens"
+    description: "Generate fake API keys, passwords, DB connection strings"
+    trigger: attacker-in-honeypot
+    constraints:
+      honeypot_only: true
+      unique_per_attacker: true
+    auto_expire: 24h
 
   - id: collect-honeypot-evidence
     tier: 1
@@ -55,6 +90,40 @@ actions:
       exclude_allowlisted_ips: true
     auto_expire: 1h
     rollback: "nft delete rule (handle stored in audit log)"
+
+  # --- CTF Deception Actions (Tier 1) ---
+
+  - id: deception-escalation
+    tier: 1
+    name: "Escalate deception level"
+    description: "Make honeypot progressively more convincing (fake admin panel, realistic errors)"
+    trigger: attacker-in-honeypot
+    techniques:
+      - fake-admin-panel
+      - realistic-error-messages
+      - breadcrumb-credentials
+      - fake-internal-docs
+
+  - id: time-delay-response
+    tier: 1
+    name: "Inject artificial latency"
+    description: "Add 5-second delay to responses to slow down attackers"
+    trigger: scanning-detected
+    constraints:
+      delay_ms: 5000
+      apply_to_ip: true
+
+  - id: fake-vulnerability-injection
+    tier: 1
+    name: "Expose fake vulnerabilities"
+    description: "Make honeypot look MORE vulnerable (fake SQLi, LFI, RCE endpoints)"
+    trigger: attacker-in-honeypot
+    fake_vulnerabilities:
+      - SQL injection in /admin/users?id=
+      - LFI in /download?file=
+      - Command injection in /api/exec?cmd=
+      - Exposed .git directory
+      - Exposed .env with credentials
 
   # --- Tier 2: Auto-execute + notify on-call ---
 
