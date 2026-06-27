@@ -75,6 +75,9 @@ spec:
               lastUpdated:
                 type: string
                 format: date-time
+              osintData:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
     additionalPrinterColumns:
     - name: AttackerIP
       type: string

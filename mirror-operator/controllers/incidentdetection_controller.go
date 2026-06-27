@@ -3,8 +3,12 @@ package controllers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -220,20 +224,112 @@ func (r *IncidentDetectionReconciler) createNetworkPolicyBlock(ctx context.Conte
 
 // performOSINTLookup runs OSINT enrichment on the attacker IP
 func (r *IncidentDetectionReconciler) performOSINTLookup(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
-	// In production, this would call Shodan, VirusTotal, etc.
-	// For now, just log and mark as success
-
 	log := log.FromContext(ctx)
 	log.Info("OSINT lookup", "ip", incident.Spec.AttackerIP)
 
-	// Placeholder - in real implementation, would populate incident.Status.OSINTData
+	osintData := make(map[string]interface{})
+	sourcesCollected := []string{}
+
+	// 1. Reverse DNS lookup
+	if rdns, err := r.reverseDNSLookup(incident.Spec.AttackerIP); err == nil {
+		osintData["reverse_dns"] = rdns
+		sourcesCollected = append(sourcesCollected, "rdns")
+	}
+
+	// 2. IP geolocation (using ip-api.com - free, no key required)
+	if geo, err := r.geoIPLookup(incident.Spec.AttackerIP); err == nil {
+		osintData["geolocation"] = geo
+		sourcesCollected = append(sourcesCollected, "geoip")
+	}
+
+	// 3. Shodan (if API key available)
+	shodanKey := os.Getenv("SHODAN_API_KEY")
+	if shodanKey != "" {
+		if shodan, err := r.shodanLookup(incident.Spec.AttackerIP, shodanKey); err == nil {
+			osintData["shodan"] = shodan
+			sourcesCollected = append(sourcesCollected, "shodan")
+		}
+	}
+
+	// Store OSINT data in incident status
+	if len(osintData) > 0 {
+		incident.Status.OSINTData = osintData
+	}
+
+	details := fmt.Sprintf("Collected from: %s", strings.Join(sourcesCollected, ", "))
+	if len(sourcesCollected) == 0 {
+		details = "No OSINT sources available"
+	}
 
 	return mirrorv1alpha1.DefensiveAction{
 		Type:      "osint-lookup",
 		Timestamp: metav1.Now(),
-		Success:   true,
-		Details:   "OSINT data collected (placeholder)",
+		Success:   len(sourcesCollected) > 0,
+		Details:   details,
 	}, nil
+}
+
+// reverseDNSLookup performs reverse DNS lookup
+func (r *IncidentDetectionReconciler) reverseDNSLookup(ip string) (string, error) {
+	names, err := net.LookupAddr(ip)
+	if err != nil || len(names) == 0 {
+		return "", err
+	}
+	return names[0], nil
+}
+
+// geoIPLookup gets geolocation data from ip-api.com (free, no key)
+func (r *IncidentDetectionReconciler) geoIPLookup(ip string) (map[string]interface{}, error) {
+	resp, err := http.Get(fmt.Sprintf("http://ip-api.com/json/%s?fields=status,country,countryCode,region,regionName,city,isp,org,as", ip))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("geoip API returned %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if status, ok := result["status"].(string); ok && status != "success" {
+		return nil, fmt.Errorf("geoip lookup failed")
+	}
+
+	return result, nil
+}
+
+// shodanLookup queries Shodan API
+func (r *IncidentDetectionReconciler) shodanLookup(ip string, apiKey string) (map[string]interface{}, error) {
+	url := fmt.Sprintf("https://api.shodan.io/shodan/host/%s?key=%s", ip, apiKey)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("shodan API returned %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	// Extract relevant fields
+	simplified := map[string]interface{}{
+		"ports":        result["ports"],
+		"vulns":        result["vulns"],
+		"os":           result["os"],
+		"organization": result["org"],
+		"isp":          result["isp"],
+	}
+
+	return simplified, nil
 }
 
 // writeActionsToDatabase writes executed actions to PostgreSQL for dossier display
