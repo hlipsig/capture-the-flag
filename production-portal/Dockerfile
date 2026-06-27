@@ -10,9 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY app.py .
 
-# Create non-root user
-RUN useradd -u 1001 -r -g 0 -d /app -s /sbin/nologin appuser && \
-    chown -R 1001:0 /app && \
+# Fix permissions for OpenShift (UBI images already have user 1001)
+RUN chown -R 1001:0 /app && \
     chmod -R g=u /app
 
 USER 1001

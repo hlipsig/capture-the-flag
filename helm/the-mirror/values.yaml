@@ -391,7 +391,7 @@ productionPortal:
   replicaCount: 1
 
   image:
-    repository: cyber-riposte/production-portal
+    repository: image-registry.openshift-image-registry.svc:5000/cyber-riposte/production-portal
     tag: latest
     pullPolicy: Always
 
