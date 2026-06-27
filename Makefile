@@ -96,7 +96,6 @@ build-agent-openshift: login-check ## Build Mirror agent on OpenShift
 		echo "Creating BuildConfig for mirror-agent..."; \
 		oc new-build --binary --name=mirror-agent \
 			--strategy=docker \
-			--dockerfile='FROM scenario-the-mirror/Dockerfile' \
 			-l app=mirror-agent; \
 	fi
 	@# Start build from root directory

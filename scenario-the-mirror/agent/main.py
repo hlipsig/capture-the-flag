@@ -213,7 +213,9 @@ def process_event(event, pool, audit, mirrored):
         return False
 
     now = datetime.now(timezone.utc)
-    incident_id = f"INC-{now.strftime('%Y-%m%d-%H%M')}"
+    # Include attacker IP to ensure unique incident IDs for concurrent attacks
+    ip_suffix = attacker_ip.replace('.', '-')
+    incident_id = f"INC-{now.strftime('%Y%m%d-%H%M%S')}-{ip_suffix}"
 
     logger.info(f"=== Incident {incident_id} ===")
     signal_types = [s["type"] for s in detection.get("signals", [])]

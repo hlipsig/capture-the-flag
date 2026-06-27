@@ -100,8 +100,9 @@ def watch_honeypot_logs():
 
                 detected_ips.add(ip)
 
-                # Create incident
-                incident_id = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{ip.replace('.', '')[:8]}"
+                # Create incident (include IP to ensure uniqueness for concurrent attacks)
+                ip_suffix = ip.replace('.', '-')
+                incident_id = f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{ip_suffix}"
 
                 logger.info(f"🚨 DETECTION: {ip} - {detection['signature']} (confidence: {detection['confidence']})")
 
