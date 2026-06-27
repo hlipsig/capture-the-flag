@@ -106,24 +106,35 @@ def watch_honeypot_logs():
 
                 logger.info(f"🚨 DETECTION: {ip} - {detection['signature']} (confidence: {detection['confidence']})")
 
-                # Generate AI narrative
-                ai_narrative = None
+                # Execute active defense actions
+                action_results = None
                 try:
-                    from agent.ai_narrator import generate_narrative
-                    ai_narrative = generate_narrative({
-                        'attacker_ip': ip,
-                        'detection_signature': detection['signature'],
-                        'detection_confidence': detection['confidence'],
-                        'incident_id': incident_id
-                    }, style='technical')
-                    logger.info(f"🤖 AI narrative generated")
+                    from agent.incident_handler import execute_active_defense
+                    action_results = execute_active_defense(incident_id, ip, detection)
+                    logger.info(f"🛡️  Active defense executed: {', '.join(action_results.get('actions_taken', []))}")
                 except Exception as e:
-                    logger.warning(f"AI narrative generation failed: {e}")
+                    logger.warning(f"Active defense execution failed: {e}")
+
+                # Get AI narrative from action results or generate new one
+                ai_narrative = action_results.get('ai_narrative') if action_results else None
+                if not ai_narrative:
+                    try:
+                        from agent.ai_narrator import generate_narrative
+                        ai_narrative = generate_narrative({
+                            'attacker_ip': ip,
+                            'detection_signature': detection['signature'],
+                            'detection_confidence': detection['confidence'],
+                            'incident_id': incident_id
+                        }, style='technical')
+                        logger.info(f"🤖 AI narrative generated")
+                    except Exception as e:
+                        logger.warning(f"AI narrative generation failed: {e}")
 
                 # Store in database
                 try:
                     with db.get_conn() as conn:
                         with conn.cursor() as cur:
+                            actions_count = len(action_results.get('actions_taken', [])) if action_results else 0
                             cur.execute("""
                                 INSERT INTO incidents (
                                     incident_id, attacker_ip, first_seen, last_updated,
@@ -139,7 +150,7 @@ def watch_honeypot_logs():
                                 'active',
                                 detection['signature'],
                                 detection['confidence'],
-                                0,
+                                actions_count,
                                 ai_narrative
                             ))
                             conn.commit()

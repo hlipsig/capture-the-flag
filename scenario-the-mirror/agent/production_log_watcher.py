@@ -129,7 +129,16 @@ def watch_production_logs():
                     logger.info(f"   Detection: {detection.get('signature', 'Unknown')}")
                     logger.info(f"   Confidence: {detection.get('confidence', 0.0)}")
 
-                    # Create incident in database
+                    # Execute active defense actions
+                    action_results = None
+                    try:
+                        from agent.incident_handler import execute_active_defense
+                        action_results = execute_active_defense(incident_id, attacker_ip, detection)
+                        logger.info(f"🛡️  Active defense executed: {', '.join(action_results.get('actions_taken', []))}")
+                    except Exception as e:
+                        logger.warning(f"Active defense execution failed: {e}")
+
+                    # Create incident in database with action results
                     db.create_incident(
                         incident_id=incident_id,
                         attacker_ip=attacker_ip,
@@ -139,10 +148,12 @@ def watch_production_logs():
                             'source': 'production-portal',
                             'timestamp': incident_time.isoformat(),
                             'evidence': detection.get('evidence', []),
+                            'actions_taken': action_results.get('actions_taken', []) if action_results else [],
+                            'ai_narrative': action_results.get('ai_narrative') if action_results else None,
                         }
                     )
 
-                    logger.info(f"✅ Incident {incident_id} created successfully")
+                    logger.info(f"✅ Incident {incident_id} created with {len(action_results.get('actions_taken', []))} actions")
 
                 except Exception as e:
                     logger.error(f"Failed to create incident: {e}")
