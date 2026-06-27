@@ -3,7 +3,7 @@
 
 .PHONY: help all build-all build-agent build-llm build-llm-tiny build-llm-distil \
         push-all push-agent push-llm deploy-images clean login-check \
-        build-openshift build-agent-openshift build-llm-openshift \
+        build-openshift build-agent-openshift build-llm-openshift build-production-openshift \
         test-agent test-llm info
 
 # Configuration
@@ -14,6 +14,7 @@ IMAGE_TAG ?= latest
 # Image names
 AGENT_IMAGE = $(REGISTRY)/$(NAMESPACE)/mirror-agent:$(IMAGE_TAG)
 LLM_IMAGE = $(REGISTRY)/$(NAMESPACE)/llm-server:$(IMAGE_TAG)
+PRODUCTION_IMAGE = $(REGISTRY)/$(NAMESPACE)/production-portal:$(IMAGE_TAG)
 
 # LLM Model selection
 # Options: distilgpt2 (82M, fast), TinyLlama/TinyLlama-1.1B-Chat-v1.0 (1.1B, better quality)
@@ -40,8 +41,9 @@ info: ## Show build configuration
 	@echo "LLM Model:     $(YELLOW)$(LLM_MODEL)$(NC)"
 	@echo ""
 	@echo "Images to build:"
-	@echo "  Agent:  $(GREEN)$(AGENT_IMAGE)$(NC)"
-	@echo "  LLM:    $(GREEN)$(LLM_IMAGE)$(NC)"
+	@echo "  Agent:      $(GREEN)$(AGENT_IMAGE)$(NC)"
+	@echo "  LLM:        $(GREEN)$(LLM_IMAGE)$(NC)"
+	@echo "  Production: $(GREEN)$(PRODUCTION_IMAGE)$(NC)"
 	@echo ""
 
 ##@ Local Docker Builds
@@ -84,7 +86,7 @@ login-check: ## Check OpenShift login
 	fi
 	@echo "$(GREEN)✓ Logged into OpenShift as $$(oc whoami)$(NC)"
 
-build-openshift: login-check build-agent-openshift build-llm-openshift ## Build all images on OpenShift
+build-openshift: login-check build-agent-openshift build-llm-openshift build-production-openshift ## Build all images on OpenShift
 
 build-agent-openshift: login-check ## Build Mirror agent on OpenShift
 	@echo "$(BLUE)Building Mirror Agent on OpenShift...$(NC)"
@@ -126,6 +128,23 @@ build-llm-openshift: login-check ## Build LLM server on OpenShift
 	@rm -rf .tmp-llm-build
 	@echo "$(GREEN)✓ LLM server image built on OpenShift$(NC)"
 
+build-production-openshift: login-check ## Build production portal on OpenShift
+	@echo "$(BLUE)Building Production Portal on OpenShift...$(NC)"
+	@# Ensure namespace exists
+	@oc get namespace $(NAMESPACE) &> /dev/null || oc create namespace $(NAMESPACE)
+	@oc project $(NAMESPACE)
+	@# Create BuildConfig if it doesn't exist
+	@if ! oc get bc/production-portal &> /dev/null; then \
+		echo "Creating BuildConfig for production-portal..."; \
+		oc new-build --binary --name=production-portal \
+			--strategy=docker \
+			-l app=production-portal; \
+	fi
+	@# Start build from production-portal directory
+	@echo "Starting build (copying files to OpenShift)..."
+	@oc start-build production-portal --from-dir=./production-portal --follow
+	@echo "$(GREEN)✓ Production portal image built on OpenShift$(NC)"
+
 ##@ Docker Push (for external registries)
 
 push-all: push-agent push-llm ## Push all images to registry
@@ -150,6 +169,9 @@ deploy-images: build-openshift ## Build and verify images are ready for Helm
 	@oc get imagestream llm-server -n $(NAMESPACE) &> /dev/null && \
 		echo "$(GREEN)✓ llm-server imagestream exists$(NC)" || \
 		echo "$(RED)✗ llm-server imagestream not found$(NC)"
+	@oc get imagestream production-portal -n $(NAMESPACE) &> /dev/null && \
+		echo "$(GREEN)✓ production-portal imagestream exists$(NC)" || \
+		echo "$(RED)✗ production-portal imagestream not found$(NC)"
 	@echo ""
 	@echo "$(GREEN)Images are ready for Helm deployment!$(NC)"
 	@echo ""

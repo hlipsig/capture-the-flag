@@ -11,6 +11,7 @@ This is a sketch for presentation purposes — not production code.
 
 import ipaddress
 import json
+import os
 import subprocess
 import sys
 import uuid
@@ -27,7 +28,11 @@ from osint_modules.user_agent_detector import classify_user_agent, analyze_ua_ba
 
 BASE_DIR = Path(__file__).parent
 TEMPLATE_DIR = BASE_DIR / "templates"
-HONEYPOT_IP = "10.0.0.99"
+
+# Network configuration
+HONEYPOT_IP = os.getenv("HONEYPOT_IP", "simple-honeypot.cyber-riposte.svc.cluster.local")
+PRODUCTION_PORT = int(os.getenv("PRODUCTION_PORT", "8000"))
+HONEYPOT_PORT = int(os.getenv("HONEYPOT_PORT", "8080"))
 
 
 class AuditLog:
@@ -203,11 +208,14 @@ def execute_redirect(attacker_ip, pool, audit, incident_id, detection):
         print(f"[mirror] SKIPPED {action_id}: {reason}")
         return None
 
+    # nftables DNAT rule: redirect attacker's production port traffic to honeypot
+    # Format: ip saddr <attacker> tcp dport <prod_port> dnat to <honeypot>:<honeypot_port>
     rule_content = (
         f"table ip nat {{\n"
         f"    chain prerouting {{\n"
         f"        type nat hook prerouting priority -100; policy accept;\n"
-        f'        ip saddr {attacker_ip} dnat to {HONEYPOT_IP} '
+        f'        ip saddr {attacker_ip} tcp dport {PRODUCTION_PORT} '
+        f'dnat to {HONEYPOT_IP}:{HONEYPOT_PORT} '
         f'comment "mirror: redirect to honeypot"\n'
         f"    }}\n"
         f"}}\n"

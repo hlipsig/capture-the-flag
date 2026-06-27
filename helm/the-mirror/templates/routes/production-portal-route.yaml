@@ -1,0 +1,22 @@
+{{- if and .Values.productionPortal.enabled .Values.productionPortal.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: production-portal
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: production-portal
+spec:
+  host: {{ .Values.productionPortal.route.host | default "" }}
+  to:
+    kind: Service
+    name: production-portal
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None
+{{- end }}

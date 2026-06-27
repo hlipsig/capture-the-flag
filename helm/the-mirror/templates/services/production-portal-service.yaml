@@ -1,0 +1,19 @@
+{{- if .Values.productionPortal.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: production-portal
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: production-portal
+spec:
+  type: {{ .Values.productionPortal.service.type }}
+  ports:
+  - port: {{ .Values.productionPortal.service.port }}
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: production-portal
+{{- end }}

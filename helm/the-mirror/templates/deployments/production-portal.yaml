@@ -1,0 +1,75 @@
+{{- if .Values.productionPortal.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: production-portal
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: production-portal
+spec:
+  replicas: {{ .Values.productionPortal.replicaCount }}
+  selector:
+    matchLabels:
+      app: production-portal
+  template:
+    metadata:
+      labels:
+        app: production-portal
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "the-mirror.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: production-portal
+        image: "{{ .Values.productionPortal.image.repository }}:{{ .Values.productionPortal.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.productionPortal.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "8000"
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "the-mirror.fullname" . }}-production-secrets
+              key: SECRET_KEY
+        - name: MASTER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "the-mirror.fullname" . }}-production-secrets
+              key: MASTER_API_KEY
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          {{- toYaml .Values.productionPortal.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1001
+{{- end }}

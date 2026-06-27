@@ -42,9 +42,17 @@ spec:
         - name: EVENT_SOURCE
           value: {{ .Values.agent.eventSource | quote }}
 
-        # Honeypot configuration
+        # Honeypot and production portal configuration
         - name: HONEYPOT_IP
           value: "simple-honeypot.{{ include "the-mirror.namespace" . }}.svc.cluster.local"
+        - name: HONEYPOT_PORT
+          value: "8080"
+        {{- if .Values.productionPortal.enabled }}
+        - name: PRODUCTION_IP
+          value: "production-portal.{{ include "the-mirror.namespace" . }}.svc.cluster.local"
+        - name: PRODUCTION_PORT
+          value: "8000"
+        {{- end }}
 
         # Configuration paths
         - name: ACTION_POOL_PATH
@@ -146,7 +154,21 @@ spec:
         {{- end }}
 
         securityContext:
+          {{- if .Values.agent.enableRedirect }}
+          # Redirect enabled - grant NET_ADMIN for nftables
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
+            add:
+              - NET_ADMIN
+          seccompProfile:
+            type: RuntimeDefault
+          {{- else }}
+          # Redirect disabled - use restrictive security context
           {{- toYaml .Values.agent.securityContext | nindent 10 }}
+          {{- end }}
 
       volumes:
       # ConfigMap with action pool and user-agent signatures
