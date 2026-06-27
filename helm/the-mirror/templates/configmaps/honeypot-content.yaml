@@ -1,0 +1,12 @@
+{{- if .Values.honeypot.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: honeypot-web-content
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: simple-honeypot
+data:
+{{- .Files.Get "../../scenario-the-mirror/k8s/simple-honeypot.yaml" | nindent 2 }}
+{{- end}}

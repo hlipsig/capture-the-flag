@@ -1,0 +1,19 @@
+{{- if .Values.llm.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-server
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: llm-server
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.llm.port }}
+    targetPort: {{ .Values.llm.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: llm-server
+{{- end }}

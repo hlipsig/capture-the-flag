@@ -1,0 +1,17 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "the-mirror.fullname" . }}-agent
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "the-mirror.fullname" . }}-agent
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "the-mirror.serviceAccountName" . }}
+    namespace: {{ include "the-mirror.namespace" . }}
+{{- end }}

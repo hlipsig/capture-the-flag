@@ -1,0 +1,47 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "the-mirror.podSecurityContext" . | nindent 8 }}
+      containers:
+      - name: redis
+        image: {{ include "the-mirror.redis.image" . }}
+        imagePullPolicy: {{ .Values.redis.image.pullPolicy }}
+        command:
+        - redis-server
+        - /etc/redis/redis.conf
+        ports:
+        - containerPort: {{ .Values.redis.config.port }}
+          name: redis
+        volumeMounts:
+        - name: redis-config
+          mountPath: /etc/redis
+          readOnly: true
+        resources:
+          {{- toYaml .Values.redis.resources | nindent 10 }}
+        livenessProbe:
+          {{- toYaml .Values.redis.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.redis.readinessProbe | nindent 10 }}
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+{{- end }}

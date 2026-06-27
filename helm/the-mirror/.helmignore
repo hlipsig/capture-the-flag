@@ -1,0 +1,16 @@
+# Patterns to ignore when building packages
+.DS_Store
+# VCS
+.git/
+.gitignore
+.svn/
+# IDEs
+.idea/
+.vscode/
+# Backup files
+*.swp
+*.bak
+*.tmp
+*~
+# Build artifacts
+*.tgz

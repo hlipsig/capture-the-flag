@@ -1,0 +1,42 @@
+{{- if .Values.honeypot.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-honeypot
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: simple-honeypot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simple-honeypot
+  template:
+    metadata:
+      labels:
+        app: simple-honeypot
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "the-mirror.podSecurityContext" . | nindent 8 }}
+      containers:
+      - name: nginx
+        image: {{ include "the-mirror.honeypot.image" . }}
+        imagePullPolicy: {{ .Values.honeypot.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.honeypot.port }}
+          name: http
+        volumeMounts:
+        - name: web-content
+          mountPath: /usr/share/nginx/html
+          readOnly: true
+        resources:
+          {{- toYaml .Values.honeypot.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.honeypot.securityContext | nindent 10 }}
+      volumes:
+      - name: web-content
+        configMap:
+          name: honeypot-web-content
+{{- end }}

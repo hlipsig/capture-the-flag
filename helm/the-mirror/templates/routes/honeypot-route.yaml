@@ -1,0 +1,26 @@
+{{- if and .Values.honeypot.enabled .Values.honeypotRoute.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: honeypot
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: simple-honeypot
+spec:
+  {{- if .Values.honeypotRoute.host }}
+  host: {{ .Values.honeypotRoute.host }}
+  {{- end }}
+  to:
+    kind: Service
+    name: simple-honeypot
+    weight: 100
+  port:
+    targetPort: http
+  {{- if .Values.honeypotRoute.tls.enabled }}
+  tls:
+    termination: {{ .Values.honeypotRoute.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.honeypotRoute.tls.insecureEdgeTerminationPolicy }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

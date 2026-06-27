@@ -1,0 +1,47 @@
+{{- if .Values.llm.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-server
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: llm-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-server
+  template:
+    metadata:
+      labels:
+        app: llm-server
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- include "the-mirror.podSecurityContext" . | nindent 8 }}
+      containers:
+      - name: llm-server
+        image: {{ include "the-mirror.llm.image" . }}
+        imagePullPolicy: {{ .Values.llm.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.llm.port }}
+          name: http
+        env:
+        - name: MODEL_NAME
+          value: {{ .Values.llm.model | quote }}
+        - name: DEVICE
+          value: {{ .Values.llm.device | quote }}
+        - name: MAX_TOKENS
+          value: {{ .Values.llm.maxTokens | quote }}
+        resources:
+          {{- toYaml .Values.llm.resources | nindent 10 }}
+        livenessProbe:
+          {{- toYaml .Values.llm.livenessProbe | nindent 10 }}
+        readinessProbe:
+          {{- toYaml .Values.llm.readinessProbe | nindent 10 }}
+        {{- if .Values.llm.startupProbe }}
+        startupProbe:
+          {{- toYaml .Values.llm.startupProbe | nindent 10 }}
+        {{- end }}
+{{- end }}

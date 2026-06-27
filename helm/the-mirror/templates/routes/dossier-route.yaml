@@ -1,0 +1,26 @@
+{{- if and .Values.agent.enabled .Values.dossier.route.enabled }}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: dossier
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: mirror-agent
+spec:
+  {{- if .Values.dossier.route.host }}
+  host: {{ .Values.dossier.route.host }}
+  {{- end }}
+  to:
+    kind: Service
+    name: mirror-agent
+    weight: 100
+  port:
+    targetPort: dossier
+  {{- if .Values.dossier.route.tls.enabled }}
+  tls:
+    termination: {{ .Values.dossier.route.tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .Values.dossier.route.tls.insecureEdgeTerminationPolicy }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

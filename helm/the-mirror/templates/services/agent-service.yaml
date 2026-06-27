@@ -1,0 +1,23 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mirror-agent
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: mirror-agent
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.agent.healthPort }}
+    targetPort: health
+    protocol: TCP
+    name: health
+  - port: {{ .Values.agent.dossierPort }}
+    targetPort: dossier
+    protocol: TCP
+    name: dossier
+  selector:
+    app: mirror-agent
+{{- end }}

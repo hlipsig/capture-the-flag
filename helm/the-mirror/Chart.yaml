@@ -1,0 +1,44 @@
+apiVersion: v2
+name: the-mirror
+description: AI-powered active defense CTF scenario with autonomous threat intelligence
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - ctf
+  - security
+  - ai
+  - honeypot
+  - threat-intelligence
+  - active-defense
+
+home: https://github.com/hlipsig/capture-the-flag
+sources:
+  - https://github.com/hlipsig/capture-the-flag
+
+maintainers:
+  - name: The Mirror Team
+    email: hlipsig@users.noreply.github.com
+
+icon: https://raw.githubusercontent.com/hlipsig/capture-the-flag/main/.github/icon.png
+
+annotations:
+  # OpenShift-specific annotations
+  openshift.io/display-name: "The Mirror - Active Defense CTF"
+  openshift.io/provider-display-name: "CTF Security Training"
+  openshift.io/documentation-url: "https://github.com/hlipsig/capture-the-flag/blob/main/README.md"
+  openshift.io/support-url: "https://github.com/hlipsig/capture-the-flag/issues"
+
+  # Artifacthub annotations
+  artifacthub.io/category: "security"
+  artifacthub.io/license: "MIT"
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial Helm chart release with full deployment automation
+  artifacthub.io/recommendations: |
+    - url: https://prometheus-operator.dev/
+      description: Prometheus Operator for monitoring
+  artifacthub.io/screenshots: |
+    - title: The Mirror Dashboard
+      url: https://raw.githubusercontent.com/hlipsig/capture-the-flag/main/docs/screenshots/dashboard.png
