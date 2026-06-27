@@ -98,9 +98,9 @@ build-agent-openshift: login-check ## Build Mirror agent on OpenShift
 			--strategy=docker \
 			-l app=mirror-agent; \
 	fi
-	@# Start build from root directory
+	@# Start build from scenario-the-mirror directory (contains agent Dockerfile)
 	@echo "Starting build (copying files to OpenShift)..."
-	@oc start-build mirror-agent --from-dir=. --follow
+	@oc start-build mirror-agent --from-dir=./scenario-the-mirror --follow
 	@echo "$(GREEN)✓ Agent image built on OpenShift$(NC)"
 
 build-llm-openshift: login-check ## Build LLM server on OpenShift

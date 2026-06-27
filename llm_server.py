@@ -44,17 +44,22 @@ def load_model():
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-        model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID,
-            torch_dtype="auto",
-            device_map=DEVICE
-        )
+
+        # Load model - use device_map only for CUDA, not CPU
+        if DEVICE == "cpu":
+            model = AutoModelForCausalLM.from_pretrained(MODEL_ID)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(
+                MODEL_ID,
+                torch_dtype="auto",
+                device_map=DEVICE
+            )
 
         gen_pipeline = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            device=DEVICE
+            device=DEVICE if DEVICE != "cpu" else -1  # -1 means CPU for pipeline
         )
 
         logger.info(f"✅ Model loaded successfully: {MODEL_ID}")
