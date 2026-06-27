@@ -412,14 +412,13 @@ def main():
     dossier_thread.start()
 
     # CTF: Start honeypot log watcher (automatic incident detection)
-    # DISABLED: AI model download causes crashes - using manual incident creation
-    # try:
-    #     from agent.honeypot_log_watcher import watch_honeypot_logs
-    #     log_watcher_thread = threading.Thread(target=watch_honeypot_logs, daemon=True)
-    #     log_watcher_thread.start()
-    #     logger.info("Honeypot log watcher thread started")
-    # except Exception as e:
-    #     logger.warning(f"Failed to start log watcher: {e}")
+    try:
+        from agent.honeypot_log_watcher import watch_honeypot_logs
+        log_watcher_thread = threading.Thread(target=watch_honeypot_logs, daemon=True)
+        log_watcher_thread.start()
+        logger.info("✅ Honeypot log watcher thread started - automatic incident detection enabled")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to start log watcher: {e}")
 
     # Phase 9: Start configuration watcher (hot-reload)
     try:
