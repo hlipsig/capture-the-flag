@@ -27,6 +27,11 @@ rules:
     resources: ["pods"]
     verbs: ["get", "list"]
 
+  # Allow reading Pod logs for attack detection
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+
   # Allow creating Events for audit trail
   - apiGroups: [""]
     resources: ["events"]
