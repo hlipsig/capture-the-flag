@@ -1,0 +1,130 @@
+# Documentation Cleanup - The Mirror CTF
+
+## Summary of Changes
+
+### Root Directory Cleanup
+BEFORE: 50+ markdown files cluttering the root directory
+AFTER:  3 essential files in root:
+  - README.md (new, comprehensive overview)
+  - PLAYBOOK.md (CTF participant guide)
+  - TALK.md (5-minute presentation script)
+
+### New Documentation Structure
+
+docs/
+├── README.md              # Documentation index and navigation guide
+├── archive/               # 21 historical planning/status docs
+│   ├── BUILD_10_STATUS.md
+│   ├── FINAL_STATUS.md
+│   ├── IMPLEMENTATION_PLAN.md
+│   ├── PHASE[1-4]_*_COMPLETE.md
+│   └── ... (development history preserved)
+│
+├── guides/                # 13 setup and deployment guides
+│   ├── DEPLOYMENT.md
+│   ├── OPENSHIFT_DEPLOYMENT.md
+│   ├── DATABASE-SETUP.md
+│   ├── HONEYPOT-SETUP.md
+│   ├── ISTIO-SETUP.md
+│   ├── KAFKA-SETUP.md
+│   ├── SECRETS_NEEDED.md
+│   └── ... (technical setup instructions)
+│
+├── reference/             # 9 technical reference docs
+│   ├── GAMEMASTER.md
+│   ├── CTF-FLAGS.md
+│   ├── LLM-GUIDE.md
+│   ├── PHASE2-LLM.md
+│   ├── DEFENSIVE_ACTIONS_CATALOG.md
+│   ├── QUICK-START.md
+│   └── ... (reference material)
+│
+└── templates/             # 7 Jinja2 report templates
+    ├── dossier-template.md
+    ├── dossier-enhanced.md.j2
+    ├── incident-report.md.j2
+    ├── postmortem-template.md
+    └── ... (automated reporting templates)
+
+### File Categorization
+
+ARCHIVED (21 files):
+- Planning documents (PLAN_ACTIVE_AI_DEFENDER.md, IMPLEMENTATION_PLAN.md)
+- Status updates (FINAL_STATUS.md, DELIVERY_STATUS.md)
+- Build reports (BUILD_10_STATUS.md)
+- Phase completion markers (PHASE[1-4]_*_COMPLETE.md)
+- Feature tracking (AI_FEATURES.md, ACTIVE_DETECTION_FEATURES.md)
+- Deployment snapshots (WEB_DOSSIER_DEPLOYED.md, DEPLOYMENT_COMPLETE.md)
+
+MOVED TO GUIDES (13 files):
+- Deployment instructions (DEPLOYMENT.md, OPENSHIFT_DEPLOYMENT.md)
+- Infrastructure setup (DATABASE-SETUP.md, KAFKA-SETUP.md, ISTIO-SETUP.md)
+- Service configuration (HONEYPOT-SETUP.md, OBSERVABILITY-SETUP.md)
+- Development tools (HOT-RELOAD-SETUP.md)
+- Testing procedures (TESTING-GUIDE.md)
+
+MOVED TO REFERENCE (9 files):
+- CTF operations (GAMEMASTER.md, CTF-FLAGS.md)
+- Technical specs (LLM-GUIDE.md, DEFENSIVE_ACTIONS_CATALOG.md)
+- Entry points (TOM_ENTRY_POINTS.md, TOM_CTF_PASSWORD_PUZZLE.md)
+- Implementation phases (PHASE2-LLM.md, PHASE8-TEMPLATES.md)
+
+MOVED TO TEMPLATES (7 files):
+- Jinja2 report templates (*.md.j2)
+- Markdown templates (dossier-template.md, postmortem-template.md, pr-body.md)
+
+KEPT IN ROOT (3 files):
+- README.md - Main project overview (REWRITTEN)
+- PLAYBOOK.md - CTF participant guide (unchanged)
+- TALK.md - Presentation script (unchanged)
+
+### New README.md Features
+
+The main README now provides:
+- Clear "What is The Mirror?" explanation
+- Key features at-a-glance
+- Architecture diagram
+- CTF scenario overview
+- Quick start deployment instructions
+- Documentation navigation
+- Legal/ethical notes
+- Development setup
+- Contributing guidelines
+
+### Documentation Navigation
+
+Created docs/README.md as a comprehensive navigation guide with:
+- Quick navigation by category
+- Use-case-based documentation paths
+  * "I want to deploy The Mirror" → deployment flow
+  * "I want to run a CTF event" → game master flow
+  * "I want to understand the AI agent" → technical deep-dive
+  * "I want to customize templates" → template system guide
+- File organization reference
+- Key concepts glossary
+
+### Updated Cross-References
+
+Updated links in:
+- scenario-the-mirror/README.md → points to new docs/ structure
+- Main README.md → correct paths to guides and references
+
+### Benefits
+
+1. **Cleaner Repository Root**: Only essential docs visible at top level
+2. **Better Discoverability**: Organized by purpose (guides vs reference vs templates)
+3. **Historical Preservation**: Planning docs archived, not deleted
+4. **Professional Presentation**: README focuses on "what" and "how to use", not implementation details
+5. **Easier Navigation**: docs/README.md provides clear paths for different use cases
+6. **Maintainability**: Clear structure for adding future documentation
+
+### Git Status
+
+54 files changed:
+- 1 modified (README.md rewritten)
+- 46 renamed/moved to docs/
+- 2 new files created (docs/README.md, this summary)
+- 3 kept in root (README.md, PLAYBOOK.md, TALK.md)
+- 2 updated with new cross-references
+
+All changes tracked with git mv to preserve file history.

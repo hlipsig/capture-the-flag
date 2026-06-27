@@ -1,316 +1,154 @@
-# Local LLM Server - Crash-Free AI for The Mirror
+# The Mirror
 
-**Problem**: Downloading large models (Llama-3.1-8B) at runtime crashes the Mirror agent.
+> *"In fencing, a riposte is the counterattack launched immediately after parrying. You use your opponent's forward momentum against them. The Mirror is a digital riposte."*
 
-**Solution**: Pre-built lightweight LLM server with TinyLlama-1.1B-Chat.
+An AI-powered active defense CTF (Capture The Flag) challenge where reconnaissance attempts trigger autonomous counter-intelligence gathering.
 
-## Features
+## What is The Mirror?
 
-- **No Runtime Downloads**: Model pre-downloaded at build time
-- **Lightweight**: TinyLlama-1.1B (only 1.1B parameters)
-- **CPU-Optimized**: Runs efficiently on CPU without GPU
-- **Fast Inference**: ~500ms-2s per generation
-- **Crash-Free**: Tested stable on OpenShift
+When an attacker scans your infrastructure, The Mirror doesn't just block them—it redirects them to a honeypot while simultaneously running passive OSINT (Open Source Intelligence) on the attacker's own infrastructure. Every probe they send reveals something about them.
 
-## Model Specs
+An AI agent orchestrates the entire response autonomously:
+- **Detect** the reconnaissance (IDS alerts + user-agent analysis)
+- **Redirect** the attacker to a honeypot
+- **Counter-recon** by running passive OSINT against the attacker
+- **Document** everything in a structured intelligence dossier
+- **Report** findings for morning review
 
-- **Model**: TinyLlama/TinyLlama-1.1B-Chat-v1.0
-- **Size**: ~2.2GB on disk
-- **Parameters**: 1.1 billion
-- **Context**: 2048 tokens
-- **Performance**: 10-20 tokens/sec on CPU
+All actions are executed from a **pre-approved playbook**—the agent can act at 3am with nobody awake, but every decision is logged, justified, and auditable.
 
-## API Endpoints
+## Key Features
 
-### Health Check
+- **Autonomous Detection**: Suricata IDS + user-agent fingerprinting detects port scans, directory brute-forcing, and offensive tooling
+- **Smart Redirection**: nftables-based traffic redirection to honeypots without alerting the attacker
+- **Passive OSINT**: WHOIS, reverse DNS, Shodan, Certificate Transparency logs—all public data, no active scanning
+- **AI Decision Engine**: Local LLM (TinyLlama-1.1B) evaluates events and selects responses from the approved action pool
+- **Full Audit Trail**: Every action logged with timestamp, trigger data, reasoning, and confidence scores
+- **Intelligence Dossiers**: Auto-generated reports combining OSINT findings with honeypot behavior logs
+- **GitHub Integration**: Incident reports posted automatically to GitHub issues for team review
+
+## Architecture
+
+```
+Attacker Probe → Detection → Redirect to Honeypot → Passive OSINT → Intelligence Dossier
+                     ↓              ↓                      ↓               ↓
+                  IDS/Logs    nftables DNAT         Public APIs      GitHub Report
+```
+
+## CTF Scenario
+
+In this CTF, **you are the attacker being watched**. Your goal is to:
+
+1. Find the hidden web dossier (password-protected intelligence briefing)
+2. Crack the password (hint: it's in the scenario narrative)
+3. Locate the real flag among multiple decoys
+4. Avoid triggering defensive actions that reveal your techniques
+
+The twist: The Mirror is learning your reconnaissance patterns and building a profile on you as you work.
+
+## Quick Start
+
+### Prerequisites
+
+- OpenShift or Kubernetes cluster
+- Python 3.9+
+- Suricata IDS
+- nftables (for traffic redirection)
+- Optional: Shodan API key for enhanced OSINT
+
+### Deployment
+
 ```bash
-GET /health
+# Clone the repository
+git clone https://github.com/yourusername/capture-the-flag.git
+cd capture-the-flag
 
-Response:
-{
-  "status": "healthy",
-  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-  "device": "cpu"
-}
+# Build and deploy
+./build.sh
+oc apply -f k8s/
+
+# Verify deployment
+oc get pods -l app=mirror-agent
+oc logs -f deployment/mirror-agent
 ```
 
-### Model Info
-```bash
-GET /info
+See [docs/guides/DEPLOYMENT.md](docs/guides/DEPLOYMENT.md) for detailed deployment instructions.
 
-Response:
-{
-  "model": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-  "device": "cpu",
-  "max_tokens": 512,
-  "ready": true
-}
-```
+### For CTF Participants
 
-### Generate Completion
-```bash
-POST /generate
-Content-Type: application/json
+Entry points and challenges are documented in [docs/reference/GAMEMASTER.md](docs/reference/GAMEMASTER.md).
 
-{
-  "prompt": "Analyze this security alert...",
-  "max_tokens": 512,
-  "temperature": 0.3
-}
+## Documentation
 
-Response:
-{
-  "text": "This appears to be...",
-  "model": "TinyLlama/...",
-  "timestamp": "2026-06-13T..."
-}
-```
+- **[PLAYBOOK.md](PLAYBOOK.md)** - CTF participant guide and scenario overview
+- **[docs/guides/DEPLOYMENT.md](docs/guides/DEPLOYMENT.md)** - Full deployment guide
+- **[docs/guides/QUICK-START.md](docs/guides/QUICK-START.md)** - Get running in 5 minutes
+- **[docs/reference/GAMEMASTER.md](docs/reference/GAMEMASTER.md)** - Running live CTF sessions
+- **[docs/reference/CTF-FLAGS.md](docs/reference/CTF-FLAGS.md)** - Flag locations and decoys
+- **[scenario-the-mirror/README.md](scenario-the-mirror/README.md)** - Complete scenario implementation guide
 
-### Chat Completion
-```bash
-POST /chat
-Content-Type: application/json
+## Technical Components
 
-{
-  "messages": [
-    {"role": "system", "content": "You are a security analyst"},
-    {"role": "user", "content": "Is this an attack?"}
-  ],
-  "max_tokens": 512,
-  "temperature": 0.3
-}
+### Core Services
+- **mirror-agent** - Main AI orchestrator (Python)
+- **llm-server** - Local LLM inference server (TinyLlama-1.1B)
+- **suricata** - IDS for threat detection
+- **honeypot** - Decoy services for attacker engagement
 
-Response:
-{
-  "text": "Yes, this shows signs of...",
-  "model": "TinyLlama/...",
-  "timestamp": "..."
-}
-```
+### Key Modules
+- `detector.py` - Event detection and classification
+- `executor.py` - Action execution from approved playbook
+- `evidence_collector.py` - OSINT gathering coordinator
+- `github_reporter.py` - Automated incident reporting
+- `web_dossier.py` - Intelligence report generator
 
-### Security Event Evaluation (Mirror-specific)
-```bash
-POST /evaluate
-Content-Type: application/json
-
-{
-  "event": {
-    "src_ip": "1.2.3.4",
-    "alert": {"signature": "ET SCAN Nmap", "severity": 1}
-  },
-  "action_pool": [
-    {"id": "redirect-to-honeypot"},
-    {"id": "temp-block"}
-  ]
-}
-
-Response:
-{
-  "action": "redirect-to-honeypot",
-  "reasoning": "High-severity port scan detected",
-  "confidence": 0.85
-}
-```
-
-## Building & Deploying
-
-### Build Container Image
-```bash
-cd llm-server
-
-# Build locally
-docker build -t llm-server:latest .
-
-# Build on OpenShift
-oc new-build --binary --name=llm-server -l app=llm-server
-oc start-build llm-server --from-dir=. --follow
-```
-
-**Note**: Build takes ~5-10 minutes (downloads model at build time).
-
-### Deploy to Cluster
-```bash
-# Deploy LLM server
-oc apply -f k8s/llm-server-deployment.yaml
-
-# Wait for model to load
-oc wait --for=condition=Ready pod -l app=llm-server --timeout=300s
-
-# Check logs
-oc logs -f deployment/llm-server
-
-# Test health
-oc exec -it deployment/mirror-agent -- curl http://llm-server:8000/health
-```
-
-### Configure Mirror Agent
-```yaml
-env:
-- name: LLM_BACKEND
-  value: "local-server"  # Use local server instead of huggingface
-- name: LLM_SERVER_URL
-  value: "http://llm-server:8000"
-```
-
-Or use auto-detection (tries local-server first):
-```yaml
-env:
-- name: LLM_BACKEND
-  value: "auto"
-```
-
-## Performance
-
-**Startup Time**:
-- Container start: ~10s
-- Model load: ~30-60s
-- Total ready time: ~60-90s
-
-**Inference Time** (CPU):
-- Simple query: ~500ms
-- Security evaluation: ~1-2s
-- Max throughput: ~2-3 requests/sec
-
-**Resource Usage**:
-- RAM: 2-3Gi (model + inference)
-- CPU: 500m baseline, 1-2 CPU during inference
-- Disk: 2.5Gi (model weights)
-
-## Comparison: TinyLlama vs Llama-3.1-8B
-
-| Metric | TinyLlama-1.1B | Llama-3.1-8B |
-|--------|----------------|--------------|
-| Parameters | 1.1B | 8B |
-| Model Size | 2.2GB | 16GB |
-| RAM Required | 2-3Gi | 16-24Gi |
-| CPU Inference | Fast (~1s) | Slow (~10s) |
-| Runtime Download | No (pre-built) | Yes (crashes) |
-| **Status** | ✅ Works | ❌ Crashes |
-
-## Troubleshooting
-
-### Server not starting
-```bash
-# Check pod events
-oc describe pod -l app=llm-server
-
-# Check logs
-oc logs deployment/llm-server
-
-# Common issue: Memory limit too low
-# Solution: Increase memory to 4Gi in deployment
-```
-
-### Model loading timeout
-```bash
-# Startup probe allows 2 minutes
-# If still failing, increase failureThreshold in deployment:
-startupProbe:
-  failureThreshold: 18  # 3 minutes
-```
-
-### Slow inference
-```bash
-# Expected on CPU: 1-2s per query
-# To improve:
-# 1. Add more CPU (increase limits to 2-4 CPU)
-# 2. Use GPU node (change device to cuda)
-# 3. Switch to smaller model (e.g., TinyLlama-1.1B already smallest)
-```
-
-### Connection refused from Mirror agent
-```bash
-# Check service exists
-oc get svc llm-server
-
-# Test from agent pod
-oc exec -it deployment/mirror-agent -- curl http://llm-server:8000/health
-
-# Check NetworkPolicies
-oc get networkpolicy
-```
-
-## Alternative Models
-
-If TinyLlama quality is insufficient, try these lightweight alternatives:
-
-**Phi-2** (2.7B parameters, 5.5GB):
-```dockerfile
-RUN python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
-    model_id = 'microsoft/phi-2'; \
-    tokenizer = AutoTokenizer.from_pretrained(model_id); \
-    model = AutoModelForCausalLM.from_pretrained(model_id)"
-```
-
-**Falcon-RW-1B** (1B parameters, 2GB):
-```dockerfile
-RUN python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
-    model_id = 'tiiuae/falcon-rw-1b'; \
-    tokenizer = AutoTokenizer.from_pretrained(model_id); \
-    model = AutoModelForCausalLM.from_pretrained(model_id)"
-```
+### Configuration
+- `action-pool.yaml` - Pre-approved defensive actions
+- `suspicious-user-agents.yaml` - Offensive tool signatures
+- `config.yaml` - Runtime configuration
 
 ## Development
 
-### Local Testing
 ```bash
-cd llm-server
-
 # Install dependencies
 pip install -r requirements.txt
 
-# Download model
-python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
-    AutoTokenizer.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0'); \
-    AutoModelForCausalLM.from_pretrained('TinyLlama/TinyLlama-1.1B-Chat-v1.0')"
+# Run locally (dry-run mode, no actual network changes)
+python main.py --dry-run
 
-# Run server
-python3 llm_server.py
+# Run tests
+python -m pytest tests/
 
-# Test in another terminal
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/generate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello", "max_tokens": 50}'
+# Build container
+docker build -t mirror-agent:latest .
 ```
 
-### Testing with Mirror Agent (Local)
-```python
-from agent.llm.local_server_provider import LocalServerProvider
+## Legal & Ethical Notes
 
-provider = LocalServerProvider(server_url="http://localhost:8000")
+- All OSINT uses **publicly available data only** (WHOIS, DNS, Shodan, CT logs)
+- **No active scanning** of attacker infrastructure
+- Honeypots only collect data from traffic attackers **voluntarily send**
+- Always consult legal counsel before implementing active defense in production
 
-if provider.is_available():
-    print("✅ Server available:", provider.get_model_info())
-    
-    event = {
-        "src_ip": "1.2.3.4",
-        "alert": {
-            "signature": "ET SCAN Nmap",
-            "severity": 1
-        }
-    }
-    
-    response = provider.evaluate_event(event, [{"id": "redirect-to-honeypot"}])
-    print("Response:", response.action, response.confidence)
-else:
-    print("❌ Server not available")
-```
+This is a CTF training environment. Do not deploy against real attackers without legal review.
 
-## Production Recommendations
+## Contributing
 
-1. **Always use `local-server` backend in production** (not `huggingface`)
-2. **Pre-build image** with model included (don't download at runtime)
-3. **Set resource limits**: 2-4Gi RAM, 1-2 CPU
-4. **Monitor inference time**: Alert if >5s per request
-5. **Health checks**: Startup probe with 2-3 minute timeout
-6. **Horizontal scaling**: Can run multiple replicas with load balancer
+This is a demonstration CTF scenario. For issues or improvements:
 
-## Roadmap
+1. Check existing issues
+2. Open a new issue describing the problem or enhancement
+3. PRs welcome for bug fixes and feature additions
 
-- [ ] Add vLLM for faster inference
-- [ ] Support model selection via env var
-- [ ] Implement request batching
-- [ ] Add Prometheus metrics
-- [ ] GPU support for faster inference
-- [ ] Model caching/warm start optimization
+## License
+
+MIT License - see LICENSE file for details
+
+## Credits
+
+Built as a demonstration of AI-powered active defense concepts combining IDS, honeypots, OSINT, and autonomous decision-making within constrained action pools.
+
+---
+
+**Status**: Feature-complete CTF scenario ready for deployment
+**Last Updated**: June 2026

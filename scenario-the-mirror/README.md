@@ -139,42 +139,13 @@ Honeypot ◀──────────┼───────────�
                     └──────────────────────────────────────────────────────┘
 ```
 
-## Files
+## Documentation
 
-```
-scenario-the-mirror/
-├── TALK.md                         # 5-minute talk script with fencing metaphor
-├── README.md                       # This file — full implementation guide
-├── DEPLOYMENT.md                   # How to deploy: systemd, permissions, input, flow
-├── PHASE2-LLM.md                   # Phase 2: adding an LLM to the decision layer
-├── mirror_agent.py                 # Main agent orchestrator (autonomous mode)
-├── action-pool.yaml                # Pre-approved actions the agent can execute
-├── audit-log-schema.json           # Schema for structured audit trail
-├── suspicious-user-agents.yaml     # User-agent signatures for offensive tool detection
-├── osint-modules/
-│   ├── whois_lookup.py             # WHOIS registry lookup
-│   ├── reverse_dns.py              # Reverse DNS (PTR) lookup
-│   ├── shodan_lookup.py            # Shodan API query
-│   ├── cert_transparency.py        # Certificate Transparency log search
-│   └── user_agent_detector.py      # User-agent classification and tool identification
-├── honeypot/
-│   ├── docker-compose.yml          # Honeypot stack
-│   └── log-format.json             # Expected log schema for TTP extraction
-├── templates/
-│   ├── dossier-template.md         # Intelligence report template
-│   ├── postmortem-template.md      # Post-mortem report template
-│   ├── redirect-rule.nft           # nftables DNAT template
-│   └── pr-body.md                  # PR body template (for tier 3 actions)
-└── examples/
-    ├── example-dossier.md          # What a completed dossier looks like
-    ├── example-postmortem.md       # What a post-mortem report looks like
-    └── example-audit-log.json      # What the audit trail looks like
-```
-
-## Deployment & Implementation
-
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** — How to run the agent: systemd service, permissions model, input sources, and the step-by-step flow from telemetry event to autonomous response.
-- **[PHASE2-LLM.md](PHASE2-LLM.md)** — How adding an LLM to the decision layer improves novel pattern recognition, weak signal correlation, natural language audit trails, and adaptive confidence scoring — without changing the action pool or permission boundaries.
+- **[../docs/guides/DEPLOYMENT.md](../docs/guides/DEPLOYMENT.md)** — How to deploy The Mirror: systemd service, permissions model, input sources, and the step-by-step flow from telemetry event to autonomous response
+- **[../docs/reference/PHASE2-LLM.md](../docs/reference/PHASE2-LLM.md)** — How adding an LLM to the decision layer improves novel pattern recognition, weak signal correlation, natural language audit trails, and adaptive confidence scoring
+- **[../docs/reference/GAMEMASTER.md](../docs/reference/GAMEMASTER.md)** — Game master guide for running live CTF sessions
+- **[../docs/reference/CTF-FLAGS.md](../docs/reference/CTF-FLAGS.md)** — Complete flag placement guide (real and decoy flags)
+- **[../docs/templates/](../docs/templates/)** — Jinja2 templates for dossiers, post-mortems, incident reports, and PR bodies
 
 ## Legal & Ethical Notes
 
