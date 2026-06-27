@@ -168,12 +168,42 @@ def watch_production_logs():
                     logger.info(f"✅ Incident {incident_id} created - triggering active defense")
 
                     # Execute active defense actions AFTER incident is in DB
+                    actions_taken = []
+
+                    # Action 1: Redirect to honeypot
                     try:
-                        # Import here to avoid issues - we'll just skip active defense if it fails
-                        # The incident is already created, so at least detection works
-                        logger.info(f"⚠️  Active defense disabled - incident created but no automated response")
+                        from agent.actions import execute_redirect_to_honeypot, record_action_to_database
+                        redirect_result = execute_redirect_to_honeypot(attacker_ip, incident_id)
+                        record_action_to_database(db, incident_id, redirect_result)
+                        if redirect_result.get('success'):
+                            actions_taken.append('redirect-to-honeypot')
                     except Exception as e:
-                        logger.warning(f"Active defense execution failed: {e}")
+                        logger.warning(f"Redirect failed: {e}")
+
+                    # Action 2: Run OSINT
+                    try:
+                        from agent.actions import execute_osint
+                        osint_data = execute_osint(attacker_ip, incident_id)
+                        if osint_data and osint_data.get('sources'):
+                            record_action_to_database(db, incident_id, {'action': 'osint', 'data': osint_data})
+                            actions_taken.append('osint')
+                    except Exception as e:
+                        logger.warning(f"OSINT failed: {e}")
+
+                    # Action 3: Temp block
+                    try:
+                        from agent.actions import execute_temp_block
+                        block_result = execute_temp_block(attacker_ip, incident_id)
+                        record_action_to_database(db, incident_id, block_result)
+                        if block_result.get('success'):
+                            actions_taken.append('temp-block')
+                    except Exception as e:
+                        logger.warning(f"Temp block failed: {e}")
+
+                    if actions_taken:
+                        logger.info(f"🛡️  Active defense: {', '.join(actions_taken)}")
+                    else:
+                        logger.info(f"⚠️  No active defense actions succeeded")
 
                 except Exception as e:
                     logger.error(f"Failed to create incident: {e}")

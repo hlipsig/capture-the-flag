@@ -148,6 +148,39 @@ def watch_honeypot_logs():
                     if ai_narrative:
                         logger.info(f"   AI: {ai_narrative[:100]}...")
 
+                    # Execute active defense actions
+                    actions_taken = []
+
+                    try:
+                        from agent.actions import execute_redirect_to_honeypot, execute_osint, execute_temp_block, record_action_to_database
+
+                        # Already at honeypot, but log the attempt
+                        logger.info(f"ℹ️  Attacker already at honeypot - redirect not needed")
+
+                        # Run OSINT
+                        try:
+                            osint_data = execute_osint(ip, incident_id)
+                            if osint_data and osint_data.get('sources'):
+                                record_action_to_database(db, incident_id, {'action': 'osint', 'data': osint_data})
+                                actions_taken.append('osint')
+                        except Exception as e:
+                            logger.warning(f"OSINT failed: {e}")
+
+                        # Temp block
+                        try:
+                            block_result = execute_temp_block(ip, incident_id)
+                            record_action_to_database(db, incident_id, block_result)
+                            if block_result.get('success'):
+                                actions_taken.append('temp-block')
+                        except Exception as e:
+                            logger.warning(f"Temp block failed: {e}")
+
+                        if actions_taken:
+                            logger.info(f"🛡️  Active defense: {', '.join(actions_taken)}")
+
+                    except Exception as e:
+                        logger.warning(f"Active defense failed: {e}")
+
                 except Exception as e:
                     logger.error(f"Failed to create incident for {ip}: {e}")
 
