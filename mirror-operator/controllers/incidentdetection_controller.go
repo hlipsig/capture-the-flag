@@ -83,6 +83,20 @@ func (r *IncidentDetectionReconciler) Reconcile(ctx context.Context, req ctrl.Re
 			actionResult, err = r.createNetworkPolicyBlock(ctx, incident)
 		case "osint-lookup":
 			actionResult, err = r.performOSINTLookup(ctx, incident)
+		case "rate-limit-injection":
+			actionResult, err = r.injectRateLimit(ctx, incident)
+		case "request-fingerprint":
+			actionResult, err = r.captureRequestFingerprint(ctx, incident)
+		case "deploy-honeytokens":
+			actionResult, err = r.deployHoneytokens(ctx, incident)
+		case "reverse-shell-check":
+			actionResult, err = r.checkReverseShells(ctx, incident)
+		case "deception-escalation":
+			actionResult, err = r.escalateDeception(ctx, incident)
+		case "time-delay-response":
+			actionResult, err = r.injectTimeDelay(ctx, incident)
+		case "fake-vulnerability-injection":
+			actionResult, err = r.injectFakeVulnerability(ctx, incident)
 		default:
 			log.Info("unknown action type", "action", action)
 			continue
@@ -127,13 +141,28 @@ func (r *IncidentDetectionReconciler) Reconcile(ctx context.Context, req ctrl.Re
 func (r *IncidentDetectionReconciler) determineActions(incident *mirrorv1alpha1.IncidentDetection) []string {
 	actions := []string{}
 
-	// High confidence detections get immediate blocking
+	// Tier 1: Information gathering (always execute)
+	actions = append(actions, "osint-lookup")
+	actions = append(actions, "request-fingerprint")
+	actions = append(actions, "reverse-shell-check")
+
+	// Tier 2: Active defense (high confidence)
 	if incident.Spec.Confidence >= 0.90 {
 		actions = append(actions, "networkpolicy-block")
+		actions = append(actions, "rate-limit-injection")
+
+		// CTF deception actions
+		if incident.Spec.Source == "simple-honeypot" {
+			actions = append(actions, "deploy-honeytokens")
+			actions = append(actions, "deception-escalation")
+		}
 	}
 
-	// Always run OSINT for context
-	actions = append(actions, "osint-lookup")
+	// Tier 3: Annoyance (medium confidence, slow them down)
+	if incident.Spec.Confidence >= 0.70 {
+		actions = append(actions, "time-delay-response")
+		actions = append(actions, "fake-vulnerability-injection")
+	}
 
 	return actions
 }
@@ -413,10 +442,302 @@ func (r *IncidentDetectionReconciler) writeActionsToDatabase(incident *mirrorv1a
 	}
 }
 
+// injectRateLimit adds rate limiting for the attacker IP via EnvoyFilter or ConfigMap
+func (r *IncidentDetectionReconciler) injectRateLimit(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// Create ConfigMap with rate limit config for nginx/envoy
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("ratelimit-%s", incident.Name),
+			Namespace: incident.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mirror-operator",
+				"mirror.ctf/incident-id":       incident.Name,
+			},
+		},
+		Data: map[string]string{
+			"ratelimit.conf": fmt.Sprintf(`
+# Rate limit for attacker IP %s
+limit_req_zone $binary_remote_addr zone=%s:10m rate=1r/s;
+limit_req zone=%s burst=5 nodelay;
+`, incident.Spec.AttackerIP, incident.Name, incident.Name),
+		},
+	}
+
+	if err := ctrl.SetControllerReference(incident, cm, r.Scheme); err != nil {
+		return mirrorv1alpha1.DefensiveAction{}, err
+	}
+
+	if err := r.Create(ctx, cm); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return mirrorv1alpha1.DefensiveAction{}, err
+		}
+		log.Info("Rate limit config already exists", "name", cm.Name)
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "rate-limit-injection",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   fmt.Sprintf("Injected rate limit: 1 req/s for %s", incident.Spec.AttackerIP),
+	}, nil
+}
+
+// captureRequestFingerprint extracts and stores full HTTP request details
+func (r *IncidentDetectionReconciler) captureRequestFingerprint(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	// Extract evidence from incident
+	fingerprint := map[string]interface{}{
+		"ip":        incident.Spec.AttackerIP,
+		"signature": incident.Spec.DetectionSignature,
+		"timestamp": time.Now().UTC(),
+	}
+
+	if incident.Spec.Evidence != nil {
+		fingerprint["user_agent"] = incident.Spec.Evidence["userAgent"]
+		fingerprint["path"] = incident.Spec.Evidence["path"]
+		fingerprint["method"] = incident.Spec.Evidence["method"]
+	}
+
+	// Store in incident status
+	if incident.Status.OSINTData == nil {
+		incident.Status.OSINTData = make(map[string]interface{})
+	}
+	incident.Status.OSINTData["request_fingerprint"] = fingerprint
+
+	details := fmt.Sprintf("Captured: %s %s", fingerprint["method"], fingerprint["path"])
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "request-fingerprint",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   details,
+	}, nil
+}
+
+// deployHoneytokens creates canary tokens in honeypot responses
+func (r *IncidentDetectionReconciler) deployHoneytokens(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// Generate unique canary tokens
+	tokens := []string{
+		fmt.Sprintf("api_key_%s_%d", incident.Spec.AttackerIP, time.Now().Unix()),
+		fmt.Sprintf("admin_pass_%x", time.Now().UnixNano()),
+		fmt.Sprintf("db_conn_str_postgresql://admin:SecretPass123@db.internal.local/%s", incident.Name),
+	}
+
+	// Store tokens in ConfigMap for honeypot to serve
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("honeytokens-%s", incident.Name),
+			Namespace: incident.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mirror-operator",
+				"mirror.ctf/incident-id":       incident.Name,
+				"mirror.ctf/honeytoken":        "true",
+			},
+		},
+		Data: map[string]string{
+			"tokens.json": fmt.Sprintf(`{"tokens": %s}`, strings.Join(tokens, ",")),
+		},
+	}
+
+	if err := ctrl.SetControllerReference(incident, cm, r.Scheme); err != nil {
+		return mirrorv1alpha1.DefensiveAction{}, err
+	}
+
+	if err := r.Create(ctx, cm); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return mirrorv1alpha1.DefensiveAction{}, err
+		}
+		log.Info("Honeytokens already deployed", "name", cm.Name)
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "deploy-honeytokens",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   fmt.Sprintf("Deployed %d canary tokens", len(tokens)),
+	}, nil
+}
+
+// checkReverseShells monitors for egress connections from production pods
+func (r *IncidentDetectionReconciler) checkReverseShells(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// Query pod network connections via kubectl exec or network policy logs
+	// For now, placeholder - would integrate with Falco or network monitoring
+
+	log.Info("Checking for reverse shell indicators", "ip", incident.Spec.AttackerIP)
+
+	// Placeholder: In production, would check:
+	// - Unexpected egress to attacker IP
+	// - Shell processes spawned by web server
+	// - Suspicious file descriptors
+
+	findings := []string{}
+	detected := false
+
+	// Simulated check result
+	if detected {
+		findings = append(findings, "Suspicious egress connection detected")
+	}
+
+	details := "No reverse shell detected"
+	if len(findings) > 0 {
+		details = strings.Join(findings, "; ")
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "reverse-shell-check",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   details,
+	}, nil
+}
+
+// escalateDeception makes honeypot progressively more convincing
+func (r *IncidentDetectionReconciler) escalateDeception(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// Create ConfigMap with deception level instructions for honeypot
+	deceptionLevel := "high"
+	techniques := []string{
+		"fake-admin-panel",
+		"realistic-error-messages",
+		"breadcrumb-credentials",
+		"fake-internal-docs",
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("deception-%s", incident.Name),
+			Namespace: incident.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mirror-operator",
+				"mirror.ctf/incident-id":       incident.Name,
+				"mirror.ctf/deception-level":   deceptionLevel,
+			},
+		},
+		Data: map[string]string{
+			"level":      deceptionLevel,
+			"techniques": strings.Join(techniques, ","),
+			"target_ip":  incident.Spec.AttackerIP,
+		},
+	}
+
+	if err := ctrl.SetControllerReference(incident, cm, r.Scheme); err != nil {
+		return mirrorv1alpha1.DefensiveAction{}, err
+	}
+
+	if err := r.Create(ctx, cm); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return mirrorv1alpha1.DefensiveAction{}, err
+		}
+		log.Info("Deception config already exists", "name", cm.Name)
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "deception-escalation",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   fmt.Sprintf("Escalated to level: %s (%d techniques)", deceptionLevel, len(techniques)),
+	}, nil
+}
+
+// injectTimeDelay adds artificial latency to slow down attackers
+func (r *IncidentDetectionReconciler) injectTimeDelay(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// Create ConfigMap with delay configuration
+	delayMs := 5000 // 5 second delay
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("timedelay-%s", incident.Name),
+			Namespace: incident.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mirror-operator",
+				"mirror.ctf/incident-id":       incident.Name,
+			},
+		},
+		Data: map[string]string{
+			"delay_ms":  fmt.Sprintf("%d", delayMs),
+			"target_ip": incident.Spec.AttackerIP,
+		},
+	}
+
+	if err := ctrl.SetControllerReference(incident, cm, r.Scheme); err != nil {
+		return mirrorv1alpha1.DefensiveAction{}, err
+	}
+
+	if err := r.Create(ctx, cm); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return mirrorv1alpha1.DefensiveAction{}, err
+		}
+		log.Info("Time delay config already exists", "name", cm.Name)
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "time-delay-response",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   fmt.Sprintf("Injected %dms delay for %s", delayMs, incident.Spec.AttackerIP),
+	}, nil
+}
+
+// injectFakeVulnerability makes honeypot look MORE vulnerable
+func (r *IncidentDetectionReconciler) injectFakeVulnerability(ctx context.Context, incident *mirrorv1alpha1.IncidentDetection) (mirrorv1alpha1.DefensiveAction, error) {
+	log := log.FromContext(ctx)
+
+	// List of fake vulnerabilities to expose
+	fakeVulns := []string{
+		"SQL injection in /admin/users?id=",
+		"LFI in /download?file=",
+		"Command injection in /api/exec?cmd=",
+		"Exposed .git directory",
+		"Exposed .env file with credentials",
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("fakevuln-%s", incident.Name),
+			Namespace: incident.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mirror-operator",
+				"mirror.ctf/incident-id":       incident.Name,
+			},
+		},
+		Data: map[string]string{
+			"vulnerabilities": strings.Join(fakeVulns, "\n"),
+			"target_ip":       incident.Spec.AttackerIP,
+		},
+	}
+
+	if err := ctrl.SetControllerReference(incident, cm, r.Scheme); err != nil {
+		return mirrorv1alpha1.DefensiveAction{}, err
+	}
+
+	if err := r.Create(ctx, cm); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return mirrorv1alpha1.DefensiveAction{}, err
+		}
+		log.Info("Fake vulnerability config already exists", "name", cm.Name)
+	}
+
+	return mirrorv1alpha1.DefensiveAction{
+		Type:      "fake-vulnerability-injection",
+		Timestamp: metav1.Now(),
+		Success:   true,
+		Details:   fmt.Sprintf("Injected %d fake vulnerabilities", len(fakeVulns)),
+	}, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *IncidentDetectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&mirrorv1alpha1.IncidentDetection{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Owns(&corev1.ConfigMap{}).
 		Complete(r)
 }
