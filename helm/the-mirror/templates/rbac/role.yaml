@@ -36,4 +36,9 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+
+  # Allow creating IncidentDetection CRs for operator-based active defense
+  - apiGroups: ["mirror.ctf"]
+    resources: ["incidentdetections"]
+    verbs: ["create", "get", "list", "watch"]
 {{- end }}
