@@ -131,18 +131,56 @@ def watch_production_logs():
                 # Record this detection
                 detected_ips[attacker_ip] = now
 
-                # Create incident
+                # Create IncidentDetection CR (operator handles actions)
                 try:
                     # Generate incident ID with timestamp and IP
                     incident_time = datetime.now(timezone.utc)
                     ip_suffix = attacker_ip.replace('.', '-').replace(':', '-')
-                    incident_id = f"INC-{incident_time.strftime('%Y%m%d-%H%M%S')}-{ip_suffix}"
+                    incident_id = f"inc-{incident_time.strftime('%Y%m%d-%H%M%S')}-{ip_suffix}".lower()
 
                     logger.info(f"🚨 Creating incident {incident_id} for {attacker_ip}")
                     logger.info(f"   Detection: {detection_data.get('signature', 'Unknown')}")
                     logger.info(f"   Confidence: {detection_data.get('confidence', 0.0)}")
 
-                    # Store in database (using same method as honeypot watcher)
+                    # Create IncidentDetection CR
+                    custom_api = client.CustomObjectsApi()
+
+                    incident_cr = {
+                        "apiVersion": "mirror.ctf/v1alpha1",
+                        "kind": "IncidentDetection",
+                        "metadata": {
+                            "name": incident_id,
+                            "namespace": "cyber-riposte",
+                            "labels": {
+                                "app.kubernetes.io/managed-by": "mirror-agent",
+                                "mirror.ctf/source": "production-portal"
+                            }
+                        },
+                        "spec": {
+                            "attackerIP": attacker_ip,
+                            "detectionSignature": detection_data.get('signature', 'Unknown pattern'),
+                            "confidence": float(detection_data.get('confidence', 0.90)),
+                            "source": "production-portal",
+                            "evidence": {
+                                "userAgent": detection_data.get('user_agent', ''),
+                                "path": detection_data.get('path', ''),
+                                "method": detection_data.get('method', ''),
+                                "timestamp": incident_time.isoformat()
+                            }
+                        }
+                    }
+
+                    custom_api.create_namespaced_custom_object(
+                        group="mirror.ctf",
+                        version="v1alpha1",
+                        namespace="cyber-riposte",
+                        plural="incidentdetections",
+                        body=incident_cr
+                    )
+
+                    logger.info(f"✅ IncidentDetection CR created - operator will execute actions")
+
+                    # Also store in database for dossier backward compatibility
                     with db.get_conn() as conn:
                         with conn.cursor() as cur:
                             cur.execute("""
@@ -160,50 +198,10 @@ def watch_production_logs():
                                 'active',
                                 detection_data.get('signature', 'Unknown pattern'),
                                 detection_data.get('confidence', 0.90),
-                                0,  # Will be updated by active defense
-                                None  # Will be updated by active defense
+                                0,  # Operator updates this
+                                None
                             ))
                             conn.commit()
-
-                    logger.info(f"✅ Incident {incident_id} created - triggering active defense")
-
-                    # Execute active defense actions AFTER incident is in DB
-                    actions_taken = []
-
-                    # Action 1: Redirect to honeypot
-                    try:
-                        from agent.actions import execute_redirect_to_honeypot, record_action_to_database
-                        redirect_result = execute_redirect_to_honeypot(attacker_ip, incident_id)
-                        record_action_to_database(db, incident_id, redirect_result)
-                        if redirect_result.get('success'):
-                            actions_taken.append('redirect-to-honeypot')
-                    except Exception as e:
-                        logger.warning(f"Redirect failed: {e}")
-
-                    # Action 2: Run OSINT
-                    try:
-                        from agent.actions import execute_osint
-                        osint_data = execute_osint(attacker_ip, incident_id)
-                        if osint_data and osint_data.get('sources'):
-                            record_action_to_database(db, incident_id, {'action': 'osint', 'data': osint_data})
-                            actions_taken.append('osint')
-                    except Exception as e:
-                        logger.warning(f"OSINT failed: {e}")
-
-                    # Action 3: Temp block
-                    try:
-                        from agent.actions import execute_temp_block
-                        block_result = execute_temp_block(attacker_ip, incident_id)
-                        record_action_to_database(db, incident_id, block_result)
-                        if block_result.get('success'):
-                            actions_taken.append('temp-block')
-                    except Exception as e:
-                        logger.warning(f"Temp block failed: {e}")
-
-                    if actions_taken:
-                        logger.info(f"🛡️  Active defense: {', '.join(actions_taken)}")
-                    else:
-                        logger.info(f"⚠️  No active defense actions succeeded")
 
                 except Exception as e:
                     logger.error(f"Failed to create incident: {e}")

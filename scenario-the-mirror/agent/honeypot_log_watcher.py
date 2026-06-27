@@ -120,8 +120,51 @@ def watch_honeypot_logs():
                 except Exception as e:
                     logger.warning(f"AI narrative generation failed: {e}")
 
-                # Store in database
+                # Create IncidentDetection CR (operator handles actions)
                 try:
+                    from kubernetes import client as k8s_client
+
+                    custom_api = k8s_client.CustomObjectsApi()
+                    incident_time = datetime.now(timezone.utc)
+                    ip_suffix = ip.replace('.', '-').replace(':', '-')
+                    cr_name = f"inc-{incident_time.strftime('%Y%m%d-%H%M%S')}-{ip_suffix}".lower()
+
+                    incident_cr = {
+                        "apiVersion": "mirror.ctf/v1alpha1",
+                        "kind": "IncidentDetection",
+                        "metadata": {
+                            "name": cr_name,
+                            "namespace": "cyber-riposte",
+                            "labels": {
+                                "app.kubernetes.io/managed-by": "mirror-agent",
+                                "mirror.ctf/source": "honeypot"
+                            }
+                        },
+                        "spec": {
+                            "attackerIP": ip,
+                            "detectionSignature": detection['signature'],
+                            "confidence": float(detection['confidence']),
+                            "source": "simple-honeypot",
+                            "evidence": {
+                                "timestamp": incident_time.isoformat(),
+                                "narrative": ai_narrative or "Honeypot interaction detected"
+                            }
+                        }
+                    }
+
+                    custom_api.create_namespaced_custom_object(
+                        group="mirror.ctf",
+                        version="v1alpha1",
+                        namespace="cyber-riposte",
+                        plural="incidentdetections",
+                        body=incident_cr
+                    )
+
+                    logger.info(f"✅ IncidentDetection CR created: {cr_name}")
+                    if ai_narrative:
+                        logger.info(f"   AI: {ai_narrative[:100]}...")
+
+                    # Also store in database for dossier backward compatibility
                     with db.get_conn() as conn:
                         with conn.cursor() as cur:
                             cur.execute("""
@@ -132,54 +175,19 @@ def watch_honeypot_logs():
                                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                                 ON CONFLICT (incident_id) DO NOTHING
                             """, (
-                                incident_id,
+                                cr_name,
                                 ip,
-                                datetime.now(timezone.utc),
-                                datetime.now(timezone.utc),
+                                incident_time,
+                                incident_time,
                                 'active',
                                 detection['signature'],
                                 detection['confidence'],
-                                0,  # actions_count
+                                0,
                                 ai_narrative
                             ))
                             conn.commit()
 
-                    logger.info(f"✅ Incident created: {incident_id}")
-                    if ai_narrative:
-                        logger.info(f"   AI: {ai_narrative[:100]}...")
-
-                    # Execute active defense actions
-                    actions_taken = []
-
-                    try:
-                        from agent.actions import execute_redirect_to_honeypot, execute_osint, execute_temp_block, record_action_to_database
-
-                        # Already at honeypot, but log the attempt
-                        logger.info(f"ℹ️  Attacker already at honeypot - redirect not needed")
-
-                        # Run OSINT
-                        try:
-                            osint_data = execute_osint(ip, incident_id)
-                            if osint_data and osint_data.get('sources'):
-                                record_action_to_database(db, incident_id, {'action': 'osint', 'data': osint_data})
-                                actions_taken.append('osint')
-                        except Exception as e:
-                            logger.warning(f"OSINT failed: {e}")
-
-                        # Temp block
-                        try:
-                            block_result = execute_temp_block(ip, incident_id)
-                            record_action_to_database(db, incident_id, block_result)
-                            if block_result.get('success'):
-                                actions_taken.append('temp-block')
-                        except Exception as e:
-                            logger.warning(f"Temp block failed: {e}")
-
-                        if actions_taken:
-                            logger.info(f"🛡️  Active defense: {', '.join(actions_taken)}")
-
-                    except Exception as e:
-                        logger.warning(f"Active defense failed: {e}")
+                    logger.info(f"ℹ️  Operator will execute active defense actions")
 
                 except Exception as e:
                     logger.error(f"Failed to create incident for {ip}: {e}")

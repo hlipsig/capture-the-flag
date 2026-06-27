@@ -22,16 +22,18 @@ logger = logging.getLogger(__name__)
 
 @app.after_request
 def log_request(response):
-    """Log requests in nginx-like format with user-agent for attack detection."""
+    """Log requests in nginx combined format for attack detection."""
     # Skip health check logging
     if request.path in ['/health', '/healthz', '/readyz']:
         return response
 
-    # Log in format that log_detector can parse
-    # Format: IP - - [timestamp] "METHOD path HTTP/1.1" status "user-agent"
+    # Log in nginx combined format that log_detector expects
+    # Format: IP - - [timestamp] "METHOD path HTTP/1.1" status size "referer" "user-agent"
     user_agent = request.headers.get('User-Agent', '-')
+    referer = request.headers.get('Referer', '-')
     timestamp = datetime.now().strftime('%d/%b/%Y:%H:%M:%S +0000')
-    log_line = f'{request.remote_addr} - - [{timestamp}] "{request.method} {request.path} HTTP/1.1" {response.status_code} "{user_agent}"'
+    content_length = response.content_length or 0
+    log_line = f'{request.remote_addr} - - [{timestamp}] "{request.method} {request.path} HTTP/1.1" {response.status_code} {content_length} "{referer}" "{user_agent}"'
     logger.info(log_line)
     return response
 
