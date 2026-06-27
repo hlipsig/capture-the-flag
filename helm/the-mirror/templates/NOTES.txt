@@ -1,0 +1,178 @@
+███████╗██╗  ██╗███████╗    ███╗   ███╗██╗██████╗ ██████╗  ██████╗ ██████╗
+╚══██╔══╝██║  ██║██╔════╝    ████╗ ████║██║██╔══██╗██╔══██╗██╔═══██╗██╔══██╗
+   ██║   ███████║█████╗      ██╔████╔██║██║██████╔╝██████╔╝██║   ██║██████╔╝
+   ██║   ██╔══██║██╔══╝      ██║╚██╔╝██║██║██╔══██╗██╔══██╗██║   ██║██╔══██╗
+   ██║   ██║  ██║███████╗    ██║ ╚═╝ ██║██║██║  ██║██║  ██║╚██████╔╝██║  ██║
+   ╚═╝   ╚═╝  ╚═╝╚══════╝    ╚═╝     ╚═╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝
+
+   AI-Powered Active Defense CTF - "In fencing, a riposte is a counterattack"
+
+Thank you for installing {{ .Chart.Name }}!
+
+Release Name: {{ .Release.Name }}
+Namespace: {{ include "the-mirror.namespace" . }}
+Chart Version: {{ .Chart.Version }}
+App Version: {{ .Chart.AppVersion }}
+
+================================================================================
+DEPLOYMENT STATUS
+================================================================================
+
+Your deployment includes the following components:
+
+{{- if .Values.agent.enabled }}
+✓ Mirror Agent        - AI orchestrator ({{ .Values.agent.replicaCount }} replica{{ if gt .Values.agent.replicaCount 1.0 }}s{{ end }})
+{{- end }}
+{{- if .Values.postgres.enabled }}
+✓ PostgreSQL          - Audit log database
+{{- end }}
+{{- if .Values.honeypot.enabled }}
+✓ Honeypot            - HTTP decoy service
+{{- end }}
+{{- if .Values.llm.enabled }}
+✓ LLM Server          - Local AI inference ({{ .Values.llm.model }})
+{{- end }}
+{{- if .Values.redis.enabled }}
+✓ Redis               - OSINT result caching
+{{- end }}
+
+================================================================================
+ACCESS POINTS
+================================================================================
+
+1. Honeypot (CTF Entry Point):
+{{- if .Values.honeypotRoute.enabled }}
+
+   External URL:
+   {{- if .Values.honeypotRoute.host }}
+   https://{{ .Values.honeypotRoute.host }}
+   {{- else }}
+   https://honeypot-{{ include "the-mirror.namespace" . }}.<cluster-domain>
+   {{- end }}
+
+   Get the actual route:
+   $ oc get route honeypot -n {{ include "the-mirror.namespace" . }} -o jsonpath='{.spec.host}'
+   $ echo "https://$(oc get route honeypot -n {{ include "the-mirror.namespace" . }} -o jsonpath='{.spec.host}')"
+{{- else }}
+
+   Internal Service:
+   http://simple-honeypot.{{ include "the-mirror.namespace" . }}.svc.cluster.local:8080
+{{- end }}
+
+2. Dossier Web App (Intelligence Reports):
+{{- if .Values.dossier.route.enabled }}
+
+   External URL:
+   {{- if .Values.dossier.host }}
+   https://{{ .Values.dossier.host }}
+   {{- else }}
+   https://dossier-{{ include "the-mirror.namespace" . }}.<cluster-domain>
+   {{- end }}
+
+   Get the actual route:
+   $ oc get route dossier -n {{ include "the-mirror.namespace" . }} -o jsonpath='{.spec.host}'
+   $ echo "https://$(oc get route dossier -n {{ include "the-mirror.namespace" . }} -o jsonpath='{.spec.host}')"
+
+   Password: {{ .Values.agent.secrets.dossierPassword }}
+{{- else }}
+
+   Internal Service:
+   http://mirror-agent.{{ include "the-mirror.namespace" . }}.svc.cluster.local:8081
+{{- end }}
+
+================================================================================
+MONITORING & VERIFICATION
+================================================================================
+
+1. Check deployment status:
+
+   $ kubectl get all -n {{ include "the-mirror.namespace" . }}
+   $ oc get pods -n {{ include "the-mirror.namespace" . }} -w
+
+2. View Mirror Agent logs:
+
+   $ oc logs -f deployment/mirror-agent -n {{ include "the-mirror.namespace" . }}
+
+3. Check database connectivity:
+
+   $ oc exec -it statefulset/postgres -n {{ include "the-mirror.namespace" . }} -- \
+       psql -U {{ .Values.postgres.credentials.user }} -d {{ .Values.postgres.credentials.database }} -c "\dt"
+
+{{- if .Values.llm.enabled }}
+
+4. Verify LLM server is ready:
+
+   $ oc exec deployment/mirror-agent -n {{ include "the-mirror.namespace" . }} -- \
+       curl -s http://llm-server:8000/health
+{{- end }}
+
+{{- if .Values.redis.enabled }}
+
+5. Test Redis cache:
+
+   $ oc exec deployment/redis -n {{ include "the-mirror.namespace" . }} -- redis-cli ping
+{{- end }}
+
+================================================================================
+CTF SCENARIO SETUP
+================================================================================
+
+To complete the CTF setup:
+
+1. Initialize the database schema:
+
+   The postgres-init-job should run automatically. Check status:
+   $ oc get job postgres-init -n {{ include "the-mirror.namespace" . }}
+
+2. Seed CTF incidents (optional - for enhanced gameplay):
+
+   $ oc exec -it statefulset/postgres -n {{ include "the-mirror.namespace" . }} -- \
+       psql -U {{ .Values.postgres.credentials.user }} -d {{ .Values.postgres.credentials.database }}
+
+   Then run SQL inserts to create decoy incidents (see docs/reference/GAMEMASTER.md)
+
+3. Share the honeypot URL with CTF participants:
+
+   $ echo "Target: https://$(oc get route honeypot -n {{ include "the-mirror.namespace" . }} -o jsonpath='{.spec.host}')"
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+{{- if not .Values.agent.secrets.shodanApiKey }}
+⚠ WARNING: Shodan API key not configured - OSINT lookups will be limited
+   Set via: --set agent.secrets.shodanApiKey=<key>
+{{- end }}
+
+{{- if not .Values.agent.secrets.githubToken }}
+⚠ WARNING: GitHub token not configured - incident reports won't be posted
+   Set via: --set agent.secrets.githubToken=<token>
+{{- end }}
+
+{{- if eq .Values.postgres.credentials.password "changeme" }}
+⚠ WARNING: Using default database password - CHANGE IN PRODUCTION!
+   Set via: --set postgres.credentials.password=<secure-password>
+{{- end }}
+
+To update configuration:
+
+   $ helm upgrade {{ .Release.Name }} the-mirror \
+       -n {{ include "the-mirror.namespace" . }} \
+       --set agent.secrets.shodanApiKey=<your-key> \
+       --set agent.secrets.githubToken=<your-token>
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+📖 Full Documentation: https://github.com/hlipsig/capture-the-flag
+📋 Game Master Guide:  docs/reference/GAMEMASTER.md
+🎯 CTF Playbook:       PLAYBOOK.md
+🚀 Quick Start:        docs/reference/QUICK-START.md
+
+For support: https://github.com/hlipsig/capture-the-flag/issues
+
+================================================================================
+
+Happy Hunting! Remember: The Mirror sees all. 🪞
+

@@ -1,0 +1,186 @@
+{{- if .Values.agent.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirror-agent
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: mirror-agent
+    version: v1
+spec:
+  replicas: {{ .Values.agent.replicaCount }}
+  selector:
+    matchLabels:
+      app: mirror-agent
+  template:
+    metadata:
+      labels:
+        app: mirror-agent
+        version: v1
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmaps/agent-config.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets/agent-secrets.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "the-mirror.serviceAccountName" . }}
+      securityContext:
+        {{- include "the-mirror.podSecurityContext" . | nindent 8 }}
+      containers:
+      - name: mirror-agent
+        image: {{ include "the-mirror.agent.image" . }}
+        imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+        ports:
+        - name: health
+          containerPort: {{ .Values.agent.healthPort }}
+          protocol: TCP
+        - name: dossier
+          containerPort: {{ .Values.agent.dossierPort }}
+          protocol: TCP
+        env:
+        # Event source configuration
+        - name: EVENT_SOURCE
+          value: {{ .Values.agent.eventSource | quote }}
+
+        # Honeypot configuration
+        - name: HONEYPOT_IP
+          value: "simple-honeypot.{{ include "the-mirror.namespace" . }}.svc.cluster.local"
+
+        # Configuration paths
+        - name: ACTION_POOL_PATH
+          value: {{ .Values.agent.config.actionPoolPath | quote }}
+        - name: USER_AGENTS_PATH
+          value: {{ .Values.agent.config.userAgentsPath | quote }}
+
+        # Logging configuration
+        - name: LOG_LEVEL
+          value: {{ .Values.agent.logging.level | quote }}
+        - name: LOG_FORMAT
+          value: {{ .Values.agent.logging.format | quote }}
+
+        # Health check port
+        - name: HEALTH_PORT
+          value: {{ .Values.agent.healthPort | quote }}
+
+        # Dossier web server
+        - name: DOSSIER_PORT
+          value: {{ .Values.agent.dossierPort | quote }}
+
+        {{- if .Values.llm.enabled }}
+        # LLM backend configuration
+        - name: LLM_BACKEND
+          value: "local-server"
+        - name: LLM_SERVER_URL
+          value: {{ include "the-mirror.llmServerUrl" . | quote }}
+        {{- end }}
+
+        {{- if .Values.redis.enabled }}
+        # Redis cache configuration
+        - name: REDIS_URL
+          value: {{ include "the-mirror.redisUrl" . | quote }}
+        {{- end }}
+
+        # Secrets from Secret
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: mirror-agent-secrets
+              key: DATABASE_URL
+
+        - name: DOSSIER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mirror-agent-secrets
+              key: DOSSIER_PASSWORD
+
+        {{- if .Values.agent.secrets.shodanApiKey }}
+        - name: SHODAN_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mirror-agent-secrets
+              key: SHODAN_API_KEY
+              optional: true
+        {{- end }}
+
+        {{- if .Values.agent.secrets.githubToken }}
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: mirror-agent-secrets
+              key: GITHUB_TOKEN
+              optional: true
+        - name: GITHUB_REPO
+          value: {{ .Values.agent.secrets.githubRepo | quote }}
+        {{- end }}
+
+        {{- if .Values.agent.secrets.slackWebhookUrl }}
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: mirror-agent-secrets
+              key: SLACK_WEBHOOK_URL
+              optional: true
+        {{- end }}
+
+        # Liveness probe
+        livenessProbe:
+          {{- toYaml .Values.agent.livenessProbe | nindent 10 }}
+
+        # Readiness probe
+        readinessProbe:
+          {{- toYaml .Values.agent.readinessProbe | nindent 10 }}
+
+        resources:
+          {{- toYaml .Values.agent.resources | nindent 10 }}
+
+        volumeMounts:
+        # ConfigMaps
+        - name: config
+          mountPath: /etc/mirror/config
+          readOnly: true
+
+        {{- if .Values.persistence.enabled }}
+        # Persistent volume for audit logs
+        - name: audit-logs
+          mountPath: /var/log/cyber-riposte
+        {{- end }}
+
+        securityContext:
+          {{- toYaml .Values.agent.securityContext | nindent 10 }}
+
+      volumes:
+      # ConfigMap with action pool and user-agent signatures
+      - name: config
+        configMap:
+          name: mirror-agent-config
+          items:
+          - key: action-pool.yaml
+            path: action-pool.yaml
+          - key: suspicious-user-agents.yaml
+            path: suspicious-user-agents.yaml
+
+      {{- if .Values.persistence.enabled }}
+      # PersistentVolumeClaim for audit logs
+      - name: audit-logs
+        persistentVolumeClaim:
+          claimName: mirror-agent-audit-pvc
+      {{- end }}
+
+      restartPolicy: Always
+
+      {{- with .Values.agent.affinity }}
+      # Pod anti-affinity for HA
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if .Values.agent.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mirror-agent-config
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: mirror-agent
+data:
+  action-pool.yaml: |
+{{- .Files.Get "../../scenario-the-mirror/action-pool.yaml" | nindent 4 }}
+
+  suspicious-user-agents.yaml: |
+{{- .Files.Get "../../scenario-the-mirror/suspicious-user-agents.yaml" | nindent 4 }}
+{{- end }}

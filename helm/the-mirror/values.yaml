@@ -1,0 +1,377 @@
+# Default values for The Mirror CTF deployment
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global settings applied across all components
+global:
+  # Namespace where all resources will be deployed
+  namespace: cyber-riposte
+
+  # Image registry (OpenShift internal registry by default)
+  imageRegistry: image-registry.openshift-image-registry.svc:5000
+
+  # Common labels applied to all resources
+  labels:
+    app.kubernetes.io/part-of: the-mirror
+    app.kubernetes.io/managed-by: helm
+
+# Mirror Agent - Main AI orchestrator
+agent:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: cyber-riposte/mirror-agent
+    tag: latest
+    pullPolicy: Always
+
+  # Event source configuration
+  eventSource: stdin  # Options: stdin, kafka
+
+  # Logging configuration
+  logging:
+    level: INFO      # DEBUG, INFO, WARNING, ERROR
+    format: json     # json or text
+
+  # Health check endpoints
+  healthPort: 8080
+  dossierPort: 8081
+
+  # Resource limits and requests
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Probes configuration
+  livenessProbe:
+    httpGet:
+      path: /healthz
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: 8080
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Pod anti-affinity for HA
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - mirror-agent
+            topologyKey: kubernetes.io/hostname
+
+  # Configuration files (mounted from ConfigMap)
+  config:
+    actionPoolPath: /etc/mirror/config/action-pool.yaml
+    userAgentsPath: /etc/mirror/config/suspicious-user-agents.yaml
+
+  # Secrets (provide these via --set-file or external secret manager)
+  secrets:
+    # Shodan API key for OSINT lookups (optional)
+    shodanApiKey: ""
+
+    # GitHub integration for incident reporting (optional)
+    githubToken: ""
+    githubRepo: "hlipsig/capture-the-flag"
+
+    # Slack webhook for notifications (optional)
+    slackWebhookUrl: ""
+
+    # Database connection string
+    databaseUrl: "postgresql://mirror_agent:changeme@postgres:5432/mirror_audit"
+
+    # CTF dossier web app password
+    dossierPassword: "i_would_prefer_not_to"
+
+# PostgreSQL database for audit logs and incident storage
+postgres:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: "15-alpine"
+    pullPolicy: IfNotPresent
+
+  # Database credentials
+  credentials:
+    user: mirror_agent
+    password: changeme  # CHANGE IN PRODUCTION!
+    database: mirror_audit
+
+  # Persistent storage configuration
+  persistence:
+    enabled: true
+    size: 50Gi
+    storageClass: ""  # Use default storage class
+    accessMode: ReadWriteOnce
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+  # Probes
+  livenessProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB)
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# LLM Server - Local inference server (TinyLlama-1.1B)
+llm:
+  enabled: true
+
+  image:
+    repository: cyber-riposte/llm-server
+    tag: latest
+    pullPolicy: Always
+
+  # Model configuration
+  model: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+  device: cpu  # cpu or cuda
+  maxTokens: 512
+
+  # Service configuration
+  port: 8000
+
+  # Resource limits (LLM needs more memory)
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+  # Probes (model loading takes time)
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 60
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Startup probe (model can take 2-3 minutes to load)
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    failureThreshold: 18  # 3 minutes total
+
+# Redis cache for OSINT results
+redis:
+  enabled: true
+
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+
+  # Redis configuration
+  config:
+    maxMemory: 256mb
+    maxMemoryPolicy: allkeys-lru
+    port: 6379
+
+  # Resource limits
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # Probes
+  livenessProbe:
+    exec:
+      command:
+        - redis-cli
+        - ping
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+  readinessProbe:
+    exec:
+      command:
+        - redis-cli
+        - ping
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# Honeypot - HTTP decoy service
+honeypot:
+  enabled: true
+
+  image:
+    repository: nginxinc/nginx-unprivileged
+    tag: alpine
+    pullPolicy: IfNotPresent
+
+  # Service configuration
+  port: 8080
+
+  # Resource limits (minimal for nginx)
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "200m"
+
+  # Security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+
+  # Web content (can be customized for CTF scenario)
+  content:
+    # If you want to override the default honeypot content,
+    # provide custom HTML files via ConfigMap
+    # See templates/configmaps/honeypot-content.yaml
+    customContent: false
+
+# Dossier web app (served by mirror-agent)
+dossier:
+  # OpenShift Route configuration
+  route:
+    enabled: true
+    host: ""  # Auto-generated if empty: dossier-<namespace>.apps.<cluster-domain>
+    tls:
+      enabled: true
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+# Honeypot external access
+honeypotRoute:
+  enabled: true
+  host: ""  # Auto-generated if empty
+  tls:
+    enabled: true
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+
+# RBAC configuration
+rbac:
+  create: true
+
+  serviceAccount:
+    create: true
+    name: mirror-agent
+    annotations: {}
+
+# Persistent storage for audit logs
+persistence:
+  enabled: true
+  storageClass: ""  # Use default
+  size: 10Gi
+  accessMode: ReadWriteOnce
+
+# Monitoring configuration (Prometheus)
+monitoring:
+  enabled: false
+
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+# Kafka event streaming (future enhancement)
+kafka:
+  enabled: false
+  # When enabled, agent.eventSource will be set to "kafka"
+  # and kafka consumer configuration will be applied
+
+# Configuration files content
+# These are embedded in the chart but can be overridden
+configFiles:
+  # Action pool - pre-approved defensive actions
+  actionPool: |
+    # This will be loaded from scenario-the-mirror/action-pool.yaml
+    # and templated into the ConfigMap
+
+  # Suspicious user-agent signatures
+  userAgents: |
+    # This will be loaded from scenario-the-mirror/suspicious-user-agents.yaml
+    # and templated into the ConfigMap
+
+# Node selector for pod scheduling
+nodeSelector: {}
+
+# Tolerations for pod scheduling
+tolerations: []
+
+# Additional labels to apply to all resources
+commonLabels: {}
+
+# Additional annotations to apply to all resources
+commonAnnotations: {}

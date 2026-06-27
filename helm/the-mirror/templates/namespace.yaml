@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    name: {{ include "the-mirror.namespace" . }}
+  annotations:
+    {{- include "the-mirror.annotations" . | nindent 4 }}
+    openshift.io/display-name: "The Mirror - Active Defense CTF"
+    openshift.io/description: "AI-powered active defense CTF scenario with autonomous threat intelligence"

@@ -1,0 +1,19 @@
+{{- if .Values.honeypot.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: simple-honeypot
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: simple-honeypot
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.honeypot.port }}
+    targetPort: {{ .Values.honeypot.port }}
+    protocol: TCP
+    name: http
+  selector:
+    app: simple-honeypot
+{{- end }}
