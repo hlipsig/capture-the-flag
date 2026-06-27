@@ -2,9 +2,12 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
+	_ "github.com/lib/pq"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -108,6 +111,9 @@ func (r *IncidentDetectionReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		log.Error(err, "unable to update IncidentDetection status")
 		return ctrl.Result{}, err
 	}
+
+	// Write actions to database for dossier (async, best-effort)
+	go r.writeActionsToDatabase(incident)
 
 	// Requeue after 5 minutes to check for more actions or auto-resolve
 	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
@@ -228,6 +234,87 @@ func (r *IncidentDetectionReconciler) performOSINTLookup(ctx context.Context, in
 		Success:   true,
 		Details:   "OSINT data collected (placeholder)",
 	}, nil
+}
+
+// writeActionsToDatabase writes executed actions to PostgreSQL for dossier display
+func (r *IncidentDetectionReconciler) writeActionsToDatabase(incident *mirrorv1alpha1.IncidentDetection) {
+	// Best-effort database writes - don't fail reconciliation if this fails
+	logger := ctrl.Log.WithName("database-writer")
+
+	dbHost := os.Getenv("POSTGRES_HOST")
+	if dbHost == "" {
+		dbHost = "postgres-0.postgres.cyber-riposte.svc.cluster.local"
+	}
+
+	dbUser := os.Getenv("POSTGRES_USER")
+	if dbUser == "" {
+		dbUser = "mirror_agent"
+	}
+
+	dbPass := os.Getenv("POSTGRES_PASSWORD")
+	if dbPass == "" {
+		logger.Info("No POSTGRES_PASSWORD - skipping database writes")
+		return
+	}
+
+	dbName := os.Getenv("POSTGRES_DB")
+	if dbName == "" {
+		dbName = "mirror_audit"
+	}
+
+	connStr := fmt.Sprintf("host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+		dbHost, dbUser, dbPass, dbName)
+
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		logger.Error(err, "Failed to connect to database")
+		return
+	}
+	defer db.Close()
+
+	// Test connection
+	if err := db.Ping(); err != nil {
+		logger.Error(err, "Database ping failed")
+		return
+	}
+
+	logger.Info("Connected to database", "host", dbHost, "db", dbName)
+
+	// Write each action to audit_log table
+	for i, action := range incident.Status.ActionsExecuted {
+		actionID := fmt.Sprintf("%s-%s-%d", incident.Name, action.Type, i)
+		_, err := db.Exec(`
+			INSERT INTO audit_log (incident_id, timestamp, action_id, action_name, action_result, parameters)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			ON CONFLICT DO NOTHING
+		`,
+			incident.Name,
+			action.Timestamp.Time,
+			actionID,
+			action.Type,
+			map[bool]string{true: "success", false: "failure"}[action.Success],
+			fmt.Sprintf(`{"details": "%s"}`, action.Details),
+		)
+		if err != nil {
+			logger.Error(err, "Failed to insert action", "action_id", actionID)
+			continue
+		}
+		logger.Info("Wrote action to database", "action_id", actionID, "type", action.Type)
+	}
+
+	// Update incident actions_count
+	result, err := db.Exec(`
+		UPDATE incidents
+		SET actions_count = $1, last_updated = NOW()
+		WHERE incident_id = $2
+	`, len(incident.Status.ActionsExecuted), incident.Name)
+
+	if err != nil {
+		logger.Error(err, "Failed to update incident actions_count")
+	} else {
+		rows, _ := result.RowsAffected()
+		logger.Info("Updated incident actions_count", "incident_id", incident.Name, "rows", rows, "actions", len(incident.Status.ActionsExecuted))
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
