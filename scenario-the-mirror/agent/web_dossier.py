@@ -248,7 +248,41 @@ def create_dossier_app(db_manager=None):
                 row[0]: row[1] for row in evidence_rows
             }
 
-            # Get audit log entries
+            # Get actions from CR status (operator-based) and database (legacy)
+            actions = []
+
+            # Try to get from IncidentDetection CR first
+            try:
+                from kubernetes import client as k8s_client, config as k8s_config
+                k8s_config.load_incluster_config()
+                custom_api = k8s_client.CustomObjectsApi()
+
+                incident_cr = custom_api.get_namespaced_custom_object(
+                    group="mirror.ctf",
+                    version="v1alpha1",
+                    namespace="cyber-riposte",
+                    plural="incidentdetections",
+                    name=incident_id
+                )
+
+                # Extract actions from CR status
+                if 'status' in incident_cr and 'actionsExecuted' in incident_cr['status']:
+                    for action in incident_cr['status']['actionsExecuted']:
+                        actions.append({
+                            "timestamp": action.get('timestamp', 'N/A'),
+                            "name": action.get('type', 'unknown'),
+                            "result": "success" if action.get('success') else "failure",
+                            "parameters": {"details": action.get('details', '')}
+                        })
+
+                # Get OSINT from CR if available
+                if 'status' in incident_cr and 'osintData' in incident_cr['status']:
+                    evidence['osint'] = incident_cr['status']['osintData']
+
+            except Exception as e:
+                logger.debug(f"Could not read CR for {incident_id}: {e}")
+
+            # Also get from database audit_log (for any legacy actions)
             with db.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -263,15 +297,14 @@ def create_dossier_app(db_manager=None):
                     """, (incident_id,))
                     audit_rows = cur.fetchall()
 
-            actions = [
-                {
+            # Merge database actions
+            for row in audit_rows:
+                actions.append({
                     "timestamp": row[0].isoformat() if row[0] else "N/A",
                     "name": row[1],
                     "result": row[2],
                     "parameters": row[3],
-                }
-                for row in audit_rows
-            ]
+                })
 
             # Check if this is the participant's own IP (CTF flag hint)
             participant_ip = request.remote_addr

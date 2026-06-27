@@ -74,6 +74,17 @@ spec:
         - name: DOSSIER_PORT
           value: {{ .Values.agent.dossierPort | quote }}
 
+        # AI narrator configuration
+        {{- if .Values.agent.ai.enabled }}
+        - name: AI_ENABLED
+          value: "true"
+        - name: AI_MODEL
+          value: {{ .Values.agent.ai.model | quote }}
+        {{- else }}
+        - name: AI_ENABLED
+          value: "false"
+        {{- end }}
+
         {{- if .Values.llm.enabled }}
         # LLM backend configuration
         - name: LLM_BACKEND

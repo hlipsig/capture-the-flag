@@ -40,11 +40,11 @@ agent:
   # Resource limits and requests
   resources:
     requests:
-      memory: "256Mi"
+      memory: "512Mi"  # Increased for AI model (distilgpt2 ~82MB + overhead)
       cpu: "100m"
     limits:
-      memory: "512Mi"
-      cpu: "500m"
+      memory: "1Gi"  # Increased for AI model loading
+      cpu: "1000m"
 
   # Probes configuration
   livenessProbe:
@@ -80,6 +80,11 @@ agent:
 
   # Enable traffic redirect capability (requires NET_ADMIN)
   enableRedirect: false  # Set to true to enable nftables traffic redirection
+
+  # AI narrator for incident descriptions
+  ai:
+    enabled: true
+    model: "distilgpt2"  # Options: distilgpt2 (82MB), gpt2 (548MB), facebook/opt-125m (250MB)
 
   # Pod anti-affinity for HA
   affinity:
