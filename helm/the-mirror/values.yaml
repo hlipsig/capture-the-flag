@@ -390,6 +390,24 @@ commonLabels: {}
 # Additional annotations to apply to all resources
 commonAnnotations: {}
 
+# Mirror Operator - Kubernetes controller for active defense
+operator:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: cyber-riposte/mirror-operator
+    tag: latest
+    pullPolicy: Always
+
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "10m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
 # Production Portal - Real web app that The Mirror protects
 productionPortal:
   enabled: true

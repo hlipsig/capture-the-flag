@@ -1,0 +1,96 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: incidentdetections.mirror.ctf
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+spec:
+  group: mirror.ctf
+  names:
+    kind: IncidentDetection
+    listKind: IncidentDetectionList
+    plural: incidentdetections
+    shortNames:
+    - incident
+    - incidents
+    singular: incidentdetection
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - attackerIP
+            - detectionSignature
+            - confidence
+            - source
+            properties:
+              attackerIP:
+                type: string
+              detectionSignature:
+                type: string
+              confidence:
+                type: number
+                format: double
+                minimum: 0.0
+                maximum: 1.0
+              source:
+                type: string
+              evidence:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum:
+                - Detected
+                - Analyzing
+                - Responding
+                - Resolved
+              message:
+                type: string
+              actionsExecuted:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                    timestamp:
+                      type: string
+                      format: date-time
+                    success:
+                      type: boolean
+                    details:
+                      type: string
+              lastUpdated:
+                type: string
+                format: date-time
+    additionalPrinterColumns:
+    - name: AttackerIP
+      type: string
+      jsonPath: .spec.attackerIP
+    - name: Signature
+      type: string
+      jsonPath: .spec.detectionSignature
+    - name: Confidence
+      type: number
+      jsonPath: .spec.confidence
+    - name: Phase
+      type: string
+      jsonPath: .status.phase
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
+    subresources:
+      status: {}
+{{- end }}

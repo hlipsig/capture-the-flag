@@ -171,3 +171,14 @@ capabilities:
 seccompProfile:
   type: RuntimeDefault
 {{- end }}
+
+{{/*
+Mirror operator image
+*/}}
+{{- define "the-mirror.operator.image" -}}
+{{- if .Values.operator.image.repository }}
+{{- printf "%s/%s:%s" .Values.global.imageRegistry .Values.operator.image.repository (.Values.operator.image.tag | default "latest") }}
+{{- else }}
+{{- printf "%s/cyber-riposte/mirror-operator:%s" .Values.global.imageRegistry (.Values.operator.image.tag | default "latest") }}
+{{- end }}
+{{- end }}

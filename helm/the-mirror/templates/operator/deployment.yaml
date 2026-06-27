@@ -1,0 +1,73 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "the-mirror.fullname" . }}-operator
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+    app: mirror-operator
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      app: mirror-operator
+  template:
+    metadata:
+      labels:
+        app: mirror-operator
+        {{- include "the-mirror.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "the-mirror.fullname" . }}-operator
+      securityContext:
+        {{- include "the-mirror.podSecurityContext" . | nindent 8 }}
+      containers:
+      - name: manager
+        image: {{ include "the-mirror.operator.image" . }}
+        imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+        command:
+        - /manager
+        args:
+        - --leader-elect=false
+        env:
+        - name: POSTGRES_HOST
+          value: "postgres-0.postgres.{{ include "the-mirror.namespace" . }}.svc.cluster.local"
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-credentials
+              key: POSTGRES_DB
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.operator.resources | nindent 10 }}
+        securityContext:
+          {{- include "the-mirror.containerSecurityContext" . | nindent 10 }}
+{{- end }}

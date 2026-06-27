@@ -1,0 +1,47 @@
+{{- if .Values.operator.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "the-mirror.fullname" . }}-operator
+  namespace: {{ include "the-mirror.namespace" . }}
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "the-mirror.fullname" . }}-operator
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+rules:
+- apiGroups: ["mirror.ctf"]
+  resources: ["incidentdetections"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["mirror.ctf"]
+  resources: ["incidentdetections/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: ["mirror.ctf"]
+  resources: ["incidentdetections/finalizers"]
+  verbs: ["update"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "the-mirror.fullname" . }}-operator
+  labels:
+    {{- include "the-mirror.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "the-mirror.fullname" . }}-operator
+subjects:
+- kind: ServiceAccount
+  name: {{ include "the-mirror.fullname" . }}-operator
+  namespace: {{ include "the-mirror.namespace" . }}
+{{- end }}
