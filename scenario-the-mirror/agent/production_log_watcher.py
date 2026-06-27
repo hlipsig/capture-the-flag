@@ -97,6 +97,18 @@ def watch_production_logs():
             if 'kube-probe' in line or 'readyz' in line or 'healthz' in line:
                 continue
 
+            # Strip Python logging prefix (INFO:__main__: or INFO:werkzeug:)
+            # so the line starts with IP address for log_detector parsing
+            if line.startswith('INFO:'):
+                # Find the first ':' after 'INFO:'
+                colon_pos = line.find(':', 5)  # Start search after 'INFO:'
+                if colon_pos != -1:
+                    line = line[colon_pos + 1:].strip()
+
+            # Skip if line is now empty or still looks like a log prefix
+            if not line or line.startswith('WARNING') or line.startswith('ERROR'):
+                continue
+
             # Skip normal health checks
             if '/health' in line and '200' in line:
                 continue
