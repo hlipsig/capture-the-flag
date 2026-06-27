@@ -16,7 +16,31 @@ This will:
 3. Build llm-server image (TinyLlama-1.1B)
 4. Show Helm deployment command
 
-**Time**: ~10-15 minutes (LLM model download takes time)
+**Time**: ~15-20 minutes total
+
+### ⏱️ What to Expect
+
+The build process has 2 phases with different timing:
+
+**Phase 1: mirror-agent build** (~5-7 minutes)
+- Downloads base image (UBI Python 3.11)
+- Installs Python dependencies
+- Multi-stage build for smaller final image
+- **Watch for**: "Successfully pushed image-registry.../mirror-agent"
+
+**Phase 2: llm-server build** (~10-15 minutes) ⚠️
+- Downloads base image (Python 3.11 slim)
+- Installs ML libraries (PyTorch ~2GB)
+- **Downloads TinyLlama model (~2.2GB)** - This is the longest step!
+- Pre-caches model to avoid runtime download
+- **Watch for**: "Model downloaded successfully: distilgpt2" or "TinyLlama-1.1B"
+
+**Why so long?**
+- Model download: ~2.2GB for TinyLlama (or ~330MB for DistilGPT2)
+- PyTorch + dependencies: ~2GB
+- OpenShift image push: Large images take time to push to registry
+
+**Pro tip**: Use `oc logs -f bc/llm-server` in another terminal to watch the build progress in real-time.
 
 ## 📋 Prerequisites
 

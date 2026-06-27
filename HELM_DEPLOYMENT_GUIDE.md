@@ -136,12 +136,104 @@ helm install the-mirror ./helm/the-mirror \
   --set agent.resources.requests.memory=128Mi
 ```
 
+## ⏱️ Timing & Expectations
+
+**IMPORTANT**: The first deployment takes significant time due to image downloads and model loading.
+
+### Initial Image Builds (if using Makefile)
+If building images on OpenShift with `make build-openshift`:
+
+- **mirror-agent**: ~5-7 minutes
+  - Downloads Python dependencies
+  - Multi-stage build with UBI base images
+  
+- **llm-server**: ~10-15 minutes ⚠️
+  - Downloads PyTorch (~2GB)
+  - Downloads TinyLlama model (~2.2GB) 
+  - **This is the longest step** - be patient!
+
+**Total build time**: ~15-20 minutes for both images
+
+### Helm Install Timing
+After running `helm install`, expect these phases:
+
+1. **Immediate** (0-30s):
+   - ConfigMaps created
+   - Secrets created
+   - Services created
+   - PVCs created
+
+2. **Database Init** (30s-2min):
+   - postgres-0 pod starts
+   - postgres-init Job runs (via Helm hook)
+   - Database schema created automatically
+   - **Status**: `oc get job postgres-init` should show `1/1 Completed`
+
+3. **Fast Services** (1-2min):
+   - redis pod: Ready in ~30s
+   - simple-honeypot pod: Ready in ~1min
+
+4. **LLM Server** (2-4min): ⚠️
+   - Image pull: ~1-2min (if not cached)
+   - Model loading: ~1-2min
+   - **Watch for**: "✅ Model loaded successfully: distilgpt2" in logs
+   - **Health check**: `/health` endpoint must return 200
+
+5. **Mirror Agent** (2-5min): ⚠️
+   - Image pull: ~1-2min (if not cached)
+   - Waits for ConfigMaps to mount
+   - Loads action pool and user-agent signatures
+   - **Watch for**: "Agent ready to process events" in logs
+
+### Expected Pod Status Timeline
+
+```bash
+# After 1 minute
+postgres-0                         1/1   Running
+redis-xxx                          1/1   Running  
+simple-honeypot-xxx                1/1   Running
+llm-server-xxx                     0/1   ContainerCreating
+mirror-agent-xxx                   0/1   ContainerCreating
+
+# After 3-4 minutes (final state)
+postgres-0                         1/1   Running
+redis-xxx                          1/1   Running
+simple-honeypot-xxx                1/1   Running
+llm-server-xxx                     1/1   Running   ✅
+mirror-agent-xxx                   1/1   Running   ✅
+postgres-init                      0/1   Completed ✅
+```
+
+### Common "Is This Stuck?" Checks
+
+**LLM Server taking >5 minutes?**
+```bash
+oc logs -f deployment/llm-server -n cyber-riposte
+# Look for: "Loading model: distilgpt2 on cpu"
+# If stuck on model download, the image wasn't built correctly
+```
+
+**Mirror Agent in CrashLoopBackOff?**
+```bash
+oc logs deployment/mirror-agent -n cyber-riposte --previous
+# Common issues:
+# - ConfigMap empty: Check "action-pool.yaml:" has content
+# - Database connection failed: Check postgres-0 is Running
+```
+
+**Database schema not created?**
+```bash
+oc get job postgres-init -n cyber-riposte
+# Should show: COMPLETIONS 1/1
+# If failed, check: oc logs job/postgres-init
+```
+
 ## Verification
 
 ### Check Deployment Status
 
 ```bash
-# Watch pods come up
+# Watch pods come up (expect 3-5 minutes total)
 oc get pods -n cyber-riposte -w
 
 # Check all resources
@@ -293,11 +385,20 @@ helm template test ./helm/the-mirror | kubectl apply --dry-run=client -f -
 
 ## Troubleshooting
 
-### Helm 4.x Compatibility Issue (Fixed)
+### Pods Stuck in "ContainerCreating"
 
-**Problem**: Chart.yaml file missing error
-**Cause**: .helmignore was too aggressive
-**Solution**: Simplified .helmignore (already fixed in chart)
+**This is NORMAL** for first deployment (2-5 minutes). The pods are:
+- Pulling large images (~2-3GB for LLM server)
+- Mounting ConfigMaps and volumes
+- Waiting for health checks to pass
+
+**When to investigate**: Only if stuck >10 minutes
+
+**Check what's happening**:
+```bash
+oc describe pod <pod-name> -n cyber-riposte | tail -20
+# Look for: "Pulling image" or "Successfully pulled image"
+```
 
 ### Agent Pod Not Starting
 
