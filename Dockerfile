@@ -10,25 +10,32 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (pin numpy<2 for torch 2.1.0 compatibility)
 RUN pip install --no-cache-dir \
+    'numpy<2.0.0' \
     flask==3.0.0 \
     transformers==4.45.0 \
     torch==2.1.0 \
     accelerate==0.24.0 \
     sentencepiece==0.1.99
 
+# Set cache directory with proper permissions
+ENV TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    HF_HOME=/app/.cache/huggingface
+
 # Pre-download model at build time (avoids runtime download crash)
 # Default: DistilGPT-2 (82M params, ~330MB) - Ultra lightweight, fast on CPU
 # Alternative: TinyLlama-1.1B-Chat-v1.0 (1.1B params, ~2.2GB) - Better quality
 ARG MODEL_ID=distilgpt2
-RUN python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
+RUN mkdir -p /app/.cache/huggingface && \
+    python3 -c "from transformers import AutoTokenizer, AutoModelForCausalLM; \
     import os; \
     model_id = os.getenv('MODEL_ID', 'distilgpt2'); \
     print(f'Downloading {model_id}...'); \
     tokenizer = AutoTokenizer.from_pretrained(model_id); \
     model = AutoModelForCausalLM.from_pretrained(model_id); \
-    print(f'Model downloaded successfully: {model_id}')"
+    print(f'Model downloaded successfully: {model_id}')" && \
+    chmod -R 777 /app/.cache
 
 # Copy server code
 COPY llm_server.py /app/

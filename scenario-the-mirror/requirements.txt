@@ -9,6 +9,7 @@ flask>=3.0.0
 anthropic>=0.39.0
 
 # For Hugging Face local inference:
+numpy<2.0.0  # Pin for torch 2.1.0 compatibility
 transformers>=4.45.0
 torch>=2.1.0
 accelerate>=0.24.0
