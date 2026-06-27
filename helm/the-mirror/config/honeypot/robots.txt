@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /admin
+Disallow: /secret
+Disallow: /api/internal
+Disallow: /.git
+
+# Note: Check dossier archive for incident reports
+# The mirror sees all. Credentials are closer than you think.
+
+# Development flag (DO NOT USE IN PRODUCTION!)
+# flag{fake_n0t_the_real_fl4g}

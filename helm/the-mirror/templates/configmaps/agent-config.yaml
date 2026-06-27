@@ -9,8 +9,7 @@ metadata:
     app: mirror-agent
 data:
   action-pool.yaml: |
-{{- .Files.Get "../../scenario-the-mirror/action-pool.yaml" | nindent 4 }}
-
+{{ .Files.Get "config/action-pool.yaml" | nindent 4 }}
   suspicious-user-agents.yaml: |
-{{- .Files.Get "../../scenario-the-mirror/suspicious-user-agents.yaml" | nindent 4 }}
+{{ .Files.Get "config/suspicious-user-agents.yaml" | nindent 4 }}
 {{- end }}

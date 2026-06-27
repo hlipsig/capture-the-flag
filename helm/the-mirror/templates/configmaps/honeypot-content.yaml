@@ -8,5 +8,12 @@ metadata:
     {{- include "the-mirror.labels" . | nindent 4 }}
     app: simple-honeypot
 data:
-{{- .Files.Get "../../scenario-the-mirror/k8s/simple-honeypot.yaml" | nindent 2 }}
-{{- end}}
+  index.html: |
+{{ .Files.Get "config/honeypot/index.html" | nindent 4 }}
+  robots.txt: |
+{{ .Files.Get "config/honeypot/robots.txt" | nindent 4 }}
+  admin.html: |
+{{ .Files.Get "config/honeypot/admin.html" | nindent 4 }}
+  .credentials: |
+{{ .Files.Get "config/honeypot/.credentials" | nindent 4 }}
+{{- end }}

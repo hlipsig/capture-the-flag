@@ -123,9 +123,12 @@ postgres:
 
   # Database credentials
   credentials:
-    user: mirror_agent
+    username: mirror_agent
     password: changeme  # CHANGE IN PRODUCTION!
     database: mirror_audit
+
+  # Initialize database schema on install/upgrade
+  initSchema: true
 
   # Persistent storage configuration
   persistence:
